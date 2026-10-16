@@ -106,6 +106,12 @@ established: the method ranked 1280 at **3692 of 3969 candidates** and instead p
 autocorrelation lag scan (5.3, 5.4) is the method that works, and it must be reported
 against a random-pair baseline, not in absolute terms.
 
+## 5i. Enable masks, reader back-pressure, mono framing — VERIFIED
+
+`re/capture_mask.py` screening table, the all-four-readers requirement, the hysteretic state across
+port reset, the warm-up-mask control of framing quality, the exact-frame mono renderer, and the
+negative mic result are all in `docs/10-enable-masks.md` §10.1–§10.5.
+
 ## 6. Claims that are weaker than they look
 
 Recorded explicitly, because a reader will build on these.
