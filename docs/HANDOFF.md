@@ -241,6 +241,32 @@ Full detail and the experiment for each: `07-open-questions.md`.
 
 ---
 
+## 4b. Enable masks, reader back-pressure, and mono framing (2026-10-16)
+
+Full detail: `10-enable-masks.md`. The four results that change how captures must be run:
+
+1. **The enable mask gates cameras.** `0xC0`/6 with `[0,4,0,0,0,mask]`; screening shows
+   `0x48` (ToF|STD) + a reader on EP 0x84 alone gives **63.4 MB/s, 313 fps, 99.9% complete
+   frames** — the cleanest capture in the project.
+2. **EP 0x82 collapses unless a URB is pending on all four bulk IN endpoints.** With readers on
+   `{0x82}`, `{0x81,0x82}` or `{0x82,0x83}` mono runs at 0.06–0.16 MB/s; with all four it runs at
+   49–74 MB/s. Undrained endpoints back-pressure the mono stream even when the mask enables only
+   the mono cameras.
+3. **Device state is hysteretic across `libusb_reset_device`.** The same configuration gave
+   74 MB/s and 2.12 MB/s on two runs. The *warm-up mask* used in the same process before the
+   measured phase decides framing quality: warm `0x7e` → mono 54 MB/s but only 7.6% complete
+   frames; warm `0x00` → 49 MB/s with **71.3%** complete frames. Never trust a single run's rate.
+4. **The mono trailer is not a frame delimiter** (~62 Hz trailers vs 27–44 fps frames). The
+   concatenate-and-cut model splices two acquisitions into one frame and *is* the horizontal
+   slice-tearing the operator saw; fragment counters prove no data is dropped.
+   `re/make_mono_exact.py` keeps only exact 721,952 B chunks and renders tear-free mono
+   (44 fps on `screen_66_ep82.bin`, 27 fps on `cap_cold_ep82.bin`).
+
+Microphones still do not appear: mux mask `0x1f` yields only tags 102/119, and buttons (153)
+are absent even though bit 3 was already set in `0x1b`.
+
+---
+
 ## 5. Environment notes that will bite you
 
 - **The device must be on a SuperSpeed port.** `bFunctionalitySupport = 3`. On USB 2 it
