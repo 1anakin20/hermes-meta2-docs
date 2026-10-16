@@ -208,3 +208,35 @@ is derived from the device itself or from the SDK installer.
 If you have the original product documentation, the sections worth reconciling are:
 camera resolutions and frame rates, display resolution, and the sensor list. Those are
 the claims here that would benefit most from an independent source.
+
+## 7.9 Where does the SDK's colour come from? `[UNKNOWN]` — added 2026-10-16
+
+**Known:** the vendor reader writes 3-channel colour frames at 1280×720 with real chroma
+(mean |R−B| 17.4 and 9.6 on two frames). EP 0x83, armed either by the 4-command strobe or by
+the full 417-transfer vendor sequence, delivers single-channel data whose image lives in bits
+15–11 (1.6a). EP 0x84 is a 12-bit field with an invalid sentinel. EP 0x82 has returned **zero
+bytes** in every capture we made — and it is the endpoint the vendor software requests the
+largest URB on, 262,144 B.
+
+**Not known:** which endpoint carries the colour camera, or whether colour is a register-selected
+pixel format on the same camera that currently gives mono. The SDK's type system makes the
+format configurable in three separate dimensions — `RgbCameraPixelType`,
+`MonoCameraPixelType`, `RgbCameraRate`, `MonoCameraRate` — so a format register plausibly
+exists.
+
+**Experiment, in order of cost:**
+
+1. **Capture EP 0x82 while the vendor reader runs.** It is the only endpoint we have never
+   gotten data from and the one the SDK requests most bytes on. Run the reader in the VM,
+   capture on the host with the reader's own URB sizes, and check whether 0x82 yields a
+   3-channel 1280×720 stream. Apply the 1.6a bit-group coherence test to whatever arrives.
+2. **Sweep the pixel-format registers.** Read candidate registers before and after the SDK
+   configures a camera, diff, and write the difference. The `0x0006/0x0006` and
+   `0x0009/0x0004` strobe pair is the cheapest known lever over streaming behaviour and
+   should be probed first.
+3. **Correlate with `status.csv`.** The vendor reader's `status.csv` records what it thinks it
+   configured; aligning those values with register writes gives a semantic anchor.
+
+**Why it matters:** the whole point of this project is colour passthrough to the headset
+display. A monochrome 25 fps stream is a good SLAM input and a poor passthrough. Until the
+colour stream is located, the display use case is not actually served.

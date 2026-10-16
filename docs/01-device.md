@@ -133,14 +133,56 @@ prove how many mono cameras exist. `[INFERRED]`
 | Endpoint | What was observed | Interpretation |
 |---|---|---|
 | `0x81` | 256-byte records, 45-slot table, µs-scale timestamps | tracking / feature stream. Semantics `[UNKNOWN]` |
-| `0x83` | 1280-wide 16-bit image samples | the RGB camera. `[VERIFIED]` that it is 1280-wide 16-bit image data |
+| `0x83` | 1280×720 16-bit image samples, **single-channel** (1.6a) | a monochrome camera. `[VERIFIED]` that it is 1280×720 16-bit single-channel image data; `[UNKNOWN]` which physical camera |
 | `0x84` | 12-bit field, `0x0FFF` = invalid sentinel | depth / range data. `[INFERRED]` |
 | `0x82` | no data in any capture | `[UNKNOWN]` |
 
-**Cross-check that `[VERIFIED]` ties EP 0x83 to the SDK's RGB camera:** the mean of the
-16-bit samples on EP 0x83 is 20804. Scaled to 8-bit: `20804 / 65535 * 255 = 81.0`. The
-RGB frames the vendor SDK produced from the same device in the same session had mean
-brightness ~80/255. Two independent paths, same scene brightness.
+## 1.6a EP 0x83 is monochrome, and only its top 5 bits carry the image `[VERIFIED]` 2026-10-16
+
+An earlier version of this document claimed a brightness cross-check `[VERIFIED]` tied
+EP 0x83 to the SDK's RGB camera: mean of the 16-bit samples 20804 → `20804 / 65535 * 255 =
+81.0`, and the SDK's RGB frames from the same session had mean brightness ~80/255. **That
+claim is withdrawn** (EVIDENCE.md §6). Matching mean brightness does not identify a sensor,
+and a direct structural test separates the two streams.
+
+**Test.** Split each 16-bit sample into its three bit-groups — `hi5 = v >> 11`,
+`mid6 = (v >> 5) & 0x3F`, `lo5 = v & 0x1F` — and measure spatial coherence: mean absolute
+difference between horizontal neighbours divided by the same statistic on a shuffled version
+of the same pixels. A coherent image gives a low ratio; a field of independent noise gives
+≈ 1.0. Run on a complete frame from a 93.9 MB capture (`counter 126`) and independently on
+`burst83.bin`, the EP 0x83 burst from the full 417-transfer vendor sequence:
+
+| bit-group | coherence, strobe capture | coherence, full vendor sequence |
+|---|---|---|
+| `hi5` (bits 15–11) | **0.070** | **0.101** |
+| `mid6` (bits 10–5) | 0.948 | 0.988 |
+| `lo5` (bits 4–0) | 1.296 | 1.241 |
+
+`mid6` std is 18.37 and 18.41; a uniform random 6-bit field has std 18.47. Cross-group
+correlations are −0.114, −0.047, −0.004.
+
+The test is published as `tools/bitgroup.py` in the `meta2lib` repo. Run against the whole
+93.9 MB capture rather than one frame it gives 0.066 / 0.931 / 1.264 and against
+`burst83.bin` 0.101 / 0.988 / 1.238 — the same conclusion from a different window.
+
+**This refutes the RGB565 hypothesis.** A 1280×720 RGB565 frame is exactly 1,843,200 bytes —
+the same size as an EP 0x83 frame body — so the frame size alone cannot distinguish mono
+from RGB565. But under RGB565 the three bit-groups would be the R, G and B planes and **all
+three would be coherent images**. Only the top group is. The lower 11 bits are statistically
+indistinguishable from noise.
+
+**Consequence.** The SDK's colour frames are genuinely 3-channel: `last_frame.png` from the
+vendor reader measures mean R 71.5 / G 84.4 / B 87.4 with mean |R−B| 17.4, and
+`f_frame_000200.png` measures mean |R−B| 9.6 — real chroma, not a replicated grey channel.
+EP 0x83 as armed by the 4-command strobe *and* by the full vendor sequence is single-channel.
+**The colour the SDK produces does not come from the EP 0x83 stream we can capture.** Where it
+comes from is `[UNKNOWN]`; see 7.9.
+
+**Practical consequence for a reader.** Rendering by taking the high byte (`v >> 8`) is
+correct and loses nothing: the image information lives in bits 15–11, and the 3 bits of noise
+below them dither away what would otherwise be 32-level banding. Do not interpret the low
+bits as data, and do not treat the 16-bit range as 16-bit dynamic range — the effective
+depth measured here is ~5 bits (`hi5` std 4.71–6.10 on a 0–31 scale).
 
 Raw IMU is reachable on the wire in principle (`RawImuData` exists in the SDK) but the
 vendor's public C API exposes only fused pose. Which stream carries raw IMU is

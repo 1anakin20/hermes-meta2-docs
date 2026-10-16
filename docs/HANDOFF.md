@@ -113,24 +113,27 @@ Two hard constraints, both `[VERIFIED]`:
 
 Ranked next actions, highest value first:
 
-1. **Establish a trustworthy quiescent baseline.** Port reset, prove silence, then apply
+1. **Locate the colour camera.** EP 0x83 is monochrome (1.6a) — a 25 fps grey stream is a good
+   SLAM input and a poor passthrough, so the display use case is not yet served. Capture
+   EP 0x82 while the vendor reader runs (it has the largest requested URBs and has never
+   returned a byte for us), and sweep for a pixel-format register. Full experiment order in
+   7.9.
+2. **Establish a trustworthy quiescent baseline.** Port reset, prove silence, then apply
    commands. Until that exists, "no arm" and "no control traffic" are not clean baselines and
    the free-running observation cannot be explained. This is the blocker for everything else.
-2. **Find what the two strobed registers gate** — `wValue=0x0006/wIndex=0x0006` and
+3. **Find what the two strobed registers gate** — `wValue=0x0006/wIndex=0x0006` and
    `wValue=0x0009/wIndex=0x0004`. Read both before and after the strobe. The sequence is
    reproducible; its meaning is not.
-3. **Differential register probing.** Read the whole observed address range, change one
+4. **Differential register probing.** Read the whole observed address range, change one
    physical condition (cover cameras, tilt, warm up), read again. Moving addresses are
    sensor registers. Cheap, and the likely route to raw IMU.
-4. **EP 0x84 framing and units.** It now streams (88.6 MB in one session) but its frame
+5. **EP 0x84 framing and units.** It now streams (88.6 MB in one session) but its frame
    spacing is unestablished. Headset at a measured distance from a flat wall; regress values
    against distance.
-5. **EP 0x81 semantics.** Capture while actively tracking a textured scene in motion so the
+6. **EP 0x81 semantics.** Capture while actively tracking a textured scene in motion so the
    45 slots populate.
-6. **Span-base experiment.** Write a recognisable pattern across a 64-byte range, read at
+7. **Span-base experiment.** Write a recognisable pattern across a 64-byte range, read at
    many addresses/widths, map where it lands. Settles 03 §3.5.
-7. **EP 0x82.** Recheck now that streaming works — it has the largest requested URBs and has
-   never returned a byte.
 
 The previously top-ranked experiment — an active WinUSB shim logging `cyapi.dll` transfers
 during steady state — is now lower value: the command set is known, and what remains is what
