@@ -192,5 +192,10 @@ vendor's public C API exposes only fused pose. Which stream carries raw IMU is
 
 No evidence was found for: onboard storage accessible over USB, an audio output path,
 or a display data path over USB. The display is driven by the headset's own SoC, not by
-the host. `[INFERRED]` from the absence of any such endpoint or command class in the
-captured traffic; absence of evidence, not proof.
+the host.
+
+**Confirmed by the operator (2026-10-16): the display is a generic display driven over
+HDMI.** It is not a USB data path at all, which is why no endpoint, command class or
+register in any capture has ever looked like a display interface — there is nothing on the
+USB side to reverse-engineer for it. `[OPERATOR-REPORTED]` Not independently verified from
+device traffic; the USB-side absence remains `[VERIFIED]` as an absence of evidence.
