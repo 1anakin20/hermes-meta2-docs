@@ -99,6 +99,13 @@ bytes 4..  data
 `[VERIFIED]` — the address field is big-endian. Confirmed by round-trip: writing
 `3d 40 b0 07 01 80` and then reading `3d 21 b0 07 FF FF` returns `01 80`.
 
+**Evidence correction.** That round-trip was never evidence from the passive capture: the
+trace contains 279 vendor IN transfers and **none of them carries payload data**
+(`tshark -Y "usb.bmRequestType==0xc0 && usb.data_payload"` returns 0 frames). The
+round-trip is evidence from our own live probe — `data/vendor_in_responses.json`, where
+reading `0xb062` returns exactly the 22 bytes the vendor had written there — reproduced
+independently by `re/replay_reads.py`, which reads `0xb007` back as `0180`. `[VERIFIED]`
+
 ### Operations
 
 | `op` | Role | Occurrences | Data lengths observed |
@@ -129,6 +136,21 @@ IN   <status:u8> <value:N bytes>
 ```
 
 Response length was `N + 1` in **70 of 70** reads. `[VERIFIED]`
+
+**A read is only honored at the step the vendor's own sequence uses it.** This is the
+single most important constraint on register access and it is easy to get wrong:
+
+| how the read was issued | result |
+|---|---|
+| replay `ctrl_seq_full.json` transfer-for-transfer, answering each IN with the vendor's `wValue`/`wLength` | **70 reads served** with `00` + value |
+| the identical read commands re-issued after the sequence completes | 98 of 98 return a **1-byte status only**, never the value |
+| 376 addresses in ten ranges queried after the sequence, 2-byte mask | **0 readable** |
+| the 34 written addresses queried as a batch, unarmed *or* during a live streaming window | status `07` + zeros for 33 of 34 |
+
+`[VERIFIED]` (`re/replay_reads.py`, `re/replay_reread.py`, `re/reg_scan.py`,
+`re/reg_read.py`, `re/reg_read_streaming.py`). The control endpoint behaves as a fixed
+script, not a register bus. Whether another command shape unlocks arbitrary reads is
+`[UNKNOWN]`; do not build a reader that assumes registers are queryable.
 
 The leading status byte was `0x00` for the overwhelming majority of reads. `0x07` was
 observed on an early read of `0xb007`. What the status codes mean is `[UNKNOWN]`.

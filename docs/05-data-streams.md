@@ -10,7 +10,7 @@ are what a **handshake-then-read** client gets:
 | Endpoint | Bytes per trigger cycle | Content |
 |---|---|---|
 | `0x81` | 1,024 | tracking-class records (5.2) |
-| `0x82` | 0 | nothing, in every capture attempted |
+| `0x82` | 0 | nothing, for this client shape only — see the correction below |
 | `0x83` | 65,536 | 1280-wide 16-bit image samples (5.3) |
 | `0x84` | 65,536 | 12-bit field with `0x0FFF` invalid sentinel (5.4) |
 
@@ -28,6 +28,19 @@ capture. `[CAPTURED]`
 **Do not infer the endpoint map from URB sizes.** The vendor software submits huge URBs
 to endpoints that return nothing, and modest URBs to the endpoint that carries data. The
 sizes describe the software's intent, not the device's behaviour.
+
+### Withdrawn: "EP 0x82 returns nothing"
+
+EP 0x82 was recorded as silent in every capture. No capture ever had a pending reader on
+it: every streaming measurement used `Recorder(dev, (0x83,))`. With a reader thread per
+endpoint started before control traffic, EP 0x82 streams more bytes than any other
+endpoint — 67 MB in one 12 s window. The claim is withdrawn; the endpoint is a live
+camera-class stream. See 5.8 and 8.1. `[VERIFIED]`
+
+## 5.8 EP 0x82 — the A/B pair stream
+
+Record format, sample statistics, the pair structure and the displacement behaviour are
+documented in **8.1 and 8.2**, which is where the measurements live.
 
 ## 5.2 EP 0x81 — record stream
 
@@ -237,9 +250,14 @@ The earlier description — a 65,536-byte block with a header beginning at +4, c
 `u16 1312` as an explicit field — is **withdrawn**. It was a URB-sized slice of the
 202,784-byte frame above, cut at an arbitrary point. `[VERIFIED]`
 
-### Geometry: not established
+### Geometry: 352 × 288, named by a register read-back
 
-Autocorrelation of the image region finds essentially no structure:
+**Superseded.** The candidate-stride guess below was written before register reads worked.
+Register `0xa886` now reads back `0000 015f 0001 0120` — 351 and 288 — and 352 × 288 =
+101,376 is exactly this payload's sample count. See 8.3. `[VERIFIED]` read-back.
+
+The autocorrelation that motivated the guess is reproduced here unchanged, because it is
+still true and still weak:
 
 | Lag | Mean abs difference |
 |---|---|

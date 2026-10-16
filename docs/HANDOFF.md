@@ -139,6 +139,27 @@ The previously top-ranked experiment — an active WinUSB shim logging `cyapi.dl
 during steady state — is now lower value: the command set is known, and what remains is what
 the commands mean.
 
+### 2026-10-16 update — the camera question is now the front rank
+
+`08-camera-inventory.md` is the current answer to "how many cameras and which stream is
+which". What changed since the list above was written:
+
+- **EP 0x82 is a live camera-class stream**, not silent. 4,096-byte records, A/B pairs
+  sharing one counter, 2,032 coherent 10-bit samples each. The "EP 0x82 returns nothing"
+  claim is withdrawn (05 §5.1).
+- **EP 0x84's geometry is 352 × 288**, named by register `0xa886` reading back 351 and 288.
+  The 704-stride guess in 05 §5.4 is superseded.
+- **Register reads work, but only at the vendor's own sequence positions** (03 §3.4). Batch
+  reads, post-sequence re-reads and a 376-address scan all fail. Do not build a reader that
+  assumes a register bus.
+- **EP 0x81 is not a camera**: 233 of its 256 bytes are constant.
+- **The RGB camera is still not located**, and no stream has been tied to a physical lens.
+  Scene correlation cannot separate cameras that all look at the same room; occlusion can.
+
+The next experiment is `re/occlusion_test.py` (08 §8.7): six timed phases covering the whole
+headset, then its left half, then its right half, with all four endpoints recorded per
+phase. It needs an operator and a live countdown page.
+
 Full detail and the experiment for each: `07-open-questions.md`.
 
 ---
