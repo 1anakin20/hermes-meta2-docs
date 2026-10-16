@@ -11,9 +11,12 @@ handshake-then-read client gets one 65,536-byte URB per endpoint; a client that 
 looping reader on each endpoint running gets 100 to 155 full 1280x720 frames per 12 s.
 `[VERIFIED]`
 
-Data flows **only while control transfers are running**. With zero control traffic the
-endpoints go silent within seconds — the device is not free-running once armed.
-`[VERIFIED]`
+Data flows only while control transfers are running — **from a quiescent device**. That
+sentence was too strong and has been narrowed. After a port reset, a 10 s window with zero
+control transfers produced 304 frame records (30.35 fps) on EP 0x83, when the device had
+been armed by an earlier session. `[CAPTURED]` Control traffic is what starts and sustains
+streaming; a device already left armed can free-run. Which state the device is in is
+`[UNKNOWN]`, and it is the same unknown as the hysteresis below.
 
 Concurrency shape: **one process, one thread per endpoint.** Two processes cannot both
 claim interface 0; the second bulk reader fails with `LIBUSB_ERROR_BUSY`. `[VERIFIED]`
@@ -32,24 +35,80 @@ experiments read *after* arming, so "0 bytes" measured the client, not the devic
 | Full interleaved OUT+IN sequence | 65,536 bytes |
 | **Pending bulk URBs + control traffic in flight** | **100-155 full frames per 12 s** |
 
-**What is still open:** `[UNKNOWN]`
+## 7.1b The reset protocol — SOLVED 2026-10-16
 
-1. **The sustaining command set is not a single command.** The 27 unique OUTs from the last
-   100 transfers of the captured sequence sustain 18.4 MB/s with no vendor INs at all, once
-   the `0xb007` writes are removed (`data/sustaining_outs.json`). Replaying all 138 OUTs in
-   their original order sustains nothing. `[CAPTURED]`
-2. **`0xb007` writes suppress streaming.** Same set with them: 7.4 frames in 10 s. Without
-   them: 100.1 frames. `[CAPTURED]` What `0xb007` gates is not known.
-3. **Results are state-dependent.** The identical 27-command set produced 18.4 MB/s in one
-   run and 1.0 MB/s in another, depending on what had armed the device beforehand. No
-   minimal command set can be claimed until trials run behind a deterministic arm-then-test
-   reset. `[VERIFIED]` that the variance exists; `[UNKNOWN]` what governs it.
+**A USB port reset (`libusb_reset_device`) followed by closing and reopening the handle is
+the deterministic reset.** `[VERIFIED]`
 
-**Experiment that would settle the remainder:** arm with the full 417-transfer sequence,
-let the stream stop, then test one candidate subset at a time with the same arm before
-every trial, recording frames/s per subset, and bisect from there. The previously proposed
-active WinUSB shim logging `cyapi.dll` transfers during steady state is now lower value:
-the mechanism is understood and what remains is a search over commands.
+| Trial protocol | frames/s over three 10 s trials | mean | spread |
+|---|---|---|---|
+| No reset between arms | 7.50, 0.00, 0.00 | 2.50 | 3.000 |
+| Port reset before every arm | 7.80, 7.50, 7.20 | 7.50 | 0.080 |
+
+The port-reset run started from the state the other run had left the device in — 0 fps —
+and recovered 7.80 fps on its first trial. It recovers the device; it does not merely avoid
+entering the bad state. `[VERIFIED]`
+
+Closing and reopening the handle is **not** a reset. Every trial of both rows opened a
+fresh handle and closed it at the end, and the no-reset row still produced 0.00 fps twice.
+`[VERIFIED]`
+
+Arm success is not evidence that streaming will work: `arm ok=279 fail=138` appears in all
+six trials, and only three of them streamed. `[VERIFIED]`
+
+What the stuck state is: `[UNKNOWN]`. The device accepts everything — the sustaining loop
+completed 6,874 and 6,872 control transfers with **zero** failures — and emits no bulk data.
+
+## 7.1c The minimal sustaining set — SOLVED 2026-10-16
+
+**Four vendor OUT commands**, looped in this order. `[VERIFIED]` `data/minimal_outs.json`
+
+| # | wValue | wIndex | payload | role |
+|---|---|---|---|---|
+| 1 | 0x0006 | 0x0006 | `00040000007e` | assert |
+| 2 | 0x0009 | 0x0004 | `0000001b` | assert |
+| 3 | 0x0006 | 0x0006 | `000400000000` | clear |
+| 4 | 0x0009 | 0x0004 | `00000000` | clear |
+
+Two assert/deassert pairs. Found by leave-one-out on the 9 commands that survived halving:
+
+| dropped from the 9 | frames/s | verdict |
+|---|---|---|
+| `00040000007e` | 0.00 | required |
+| `0000001b` | 0.00 | required |
+| `6877696e666f2e62` (ASCII `hwinfob`) | 29.89 | droppable |
+| the 64-byte `1300ff…` write | 29.35 | droppable |
+| `3d40a8800000` | 29.84 | droppable |
+| `3d21a880ffff` | 29.80 | droppable |
+| `3d21a881ffff` | 29.99 | droppable |
+| `000400000000` | 0.00 | required |
+| `00000000` | 0.00 | required |
+
+Halving does not work: the first 4 and the last 5 of those 9 each give 0.00 fps. The set
+behaves as a sequence, not as a bag of independent triggers. `[VERIFIED]`
+
+Order is partly load-bearing. As found: 29.90 fps, spread 0.020. Sorted by `wValue`: 29.85,
+spread 0.003. Reversed: 29.89 then 0.20, spread 1.973 — unstable. `[VERIFIED]`
+
+**Withdrawn:** the framing that the 27-command tail set was the thing to minimize. Those
+numbers predate the port reset and are not comparable with anything measured after it.
+
+**Still open:** `[UNKNOWN]`
+
+1. What the two strobed registers gate. The sequence is reproducible; its meaning is not.
+2. Whether the 417-transfer arm is needed at all. With the arm, the 4 commands sustain
+   ~30 records/s. Without it, two trials gave 0.30 and 0.00 fps — but a device left armed
+   by an earlier session streams with no commands at all, so "no arm" is not yet a clean
+   baseline.
+3. What `0xb007` gates. The suppression observation (7.4 vs 100.1 frames) predates the port
+   reset and has not been re-measured behind it.
+4. What state allows the device to free-run with zero control traffic.
+
+**Experiment that would settle the remainder:** establish a quiescent baseline you can trust
+(port reset, then prove silence, and only then apply commands), then re-run the arm/no-arm
+comparison and the `0xb007` suppression test behind it. The previously proposed active
+WinUSB shim logging `cyapi.dll` transfers during steady state is now lower value: the
+command set is known, and what remains is what the commands mean.
 
 ## 7.2 What the registers mean
 

@@ -286,3 +286,63 @@ spacing has **not** been established. `[UNKNOWN]`
 The vendor SDK delivered 141 RGB frames in a 45 s session (~3.1 fps). `[CAPTURED]` The
 no-SDK client now exceeds that. **The gap was never the bus and never a missing command —
 it was that no URB was pending when the device's buffer filled.**
+
+**Caveat:** every row in the table above was measured before the port reset was known (see
+`07-open-questions.md` §7.1b), so they are not comparable with the numbers below. They are
+kept because the pattern — pending URBs plus control traffic — is what made streaming work
+at all. `[VERIFIED]`
+
+## 5.6 The ceiling is inside the device
+
+Concurrent bulk transfers do not raise EP 0x83 throughput. Same device, same 4-command set,
+6 s, 65,536-byte reads, N reader threads on the same endpoint: `[VERIFIED]`
+
+| Concurrent bulk transfers on EP 0x83 | total MB/s |
+|---|---|
+| 1 | 52.9 |
+| 2 | 50.7 |
+| 4 | 50.9 |
+
+A C reader and a Python reader reach the same number — 51.1 MB/s and 51.6 MB/s in matched
+8 s runs, with `dropped=0`, meaning the host buffer never overflowed. `[VERIFIED]` The
+synchronous submit-one-transfer-at-a-time pattern is not the bottleneck, and neither is the
+bus: the descriptor reports `bcdUSB 3.00` and "Lowest fully-functional device speed is
+SuperSpeed (5 Gbps)" with four bulk IN endpoints at `wMaxPacketSize 0x0400` (1024 bytes,
+1x), so 51 MB/s is under 9% of the link. `[CAPTURED]` The limit is inside the headset.
+
+Read size does matter, and smaller wins: `[VERIFIED]`
+
+| bulk read size | records | complete | off-stride | MB/s |
+|---|---|---|---|---|
+| 65,536 | 240 | 209 | 30 | 51.6 |
+| 262,144 | 237 | 163 | 74 | 45.9 |
+| 1,048,576 | 239 | 15 | 223 | 30.4 |
+
+## 5.7 "30 fps" is records per second, not complete frames
+
+A 30 s capture with the 4-command set: 1,468,530,688 bytes, 976 frame records, every
+counter advancing by exactly 1 — but **332 of 975 record gaps are smaller than 1,843,232
+bytes**, ranging from 40,928 to 1,843,168. `[VERIFIED]` The capture is 330,463,744 bytes
+short of 976 complete frames. `[VERIFIED]` Off-stride payloads are not whole numbers of
+1280-pixel rows: 0 of 332 are a multiple of 2,560. `[VERIFIED]`
+
+The device emits ~30 frame records per second and delivers ~51 MB/s. 30 × 1,843,232 =
+55,296,960 B/s, which is more than it delivers. `[VERIFIED]` arithmetic. The complete-frame
+ceiling is therefore about **27.7 fps**, and a client must compare each record's gap to the
+next record and discard truncated frames. `[INFERRED]` from verified byte counts.
+
+Throttling the command loop does not trade rate for completeness — it reduces both: `[VERIFIED]`
+
+| sleep after each command | records/s | complete | off-stride | MB/s |
+|---|---|---|---|---|
+| none | 29.62 | 163 | 73 | 45.9 |
+| 0.2 ms | 29.87 | 122 | 116 | 38.8 |
+| 0.5 ms | 29.99 | 49 | 190 | 28.2 |
+| 1.0 ms | 29.74 | 0 | 237 | 7.7 |
+| 2.0 ms | 29.87 | 0 | 238 | 7.8 |
+| 5.0 ms | 29.62 | 0 | 236 | 7.1 |
+| 10.0 ms | 22.87 | 0 | 182 | 5.5 |
+
+The frame counter advancing by 1 per record while payloads shrink means the device is
+counting frames it is not fully transmitting. `[INFERRED]` What it does with the remainder
+is `[UNKNOWN]`.

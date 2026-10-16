@@ -1,0 +1,30 @@
+[
+ {
+  "dir": "OUT",
+  "wValue": 6,
+  "wIndex": 6,
+  "wLength": 6,
+  "payload": "00040000007e"
+ },
+ {
+  "dir": "OUT",
+  "wValue": 9,
+  "wIndex": 4,
+  "wLength": 4,
+  "payload": "0000001b"
+ },
+ {
+  "dir": "OUT",
+  "wValue": 6,
+  "wIndex": 6,
+  "wLength": 6,
+  "payload": "000400000000"
+ },
+ {
+  "dir": "OUT",
+  "wValue": 9,
+  "wIndex": 4,
+  "wLength": 4,
+  "payload": "00000000"
+ }
+]

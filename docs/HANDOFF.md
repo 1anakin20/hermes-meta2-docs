@@ -92,33 +92,49 @@ Two hard constraints, both `[VERIFIED]`:
 
 - **One process, one thread per endpoint.** Two processes cannot both claim interface 0; the
   second bulk reader fails with `LIBUSB_ERROR_BUSY`.
-- **Data flows only while control transfers run.** With no control traffic the endpoints go
-  silent within seconds. The device is not free-running once armed.
+- **Control traffic starts and sustains streaming from a quiescent device.** Narrowed
+  2026-10-16: a device left armed by an earlier session produced 304 frame records in a 10 s
+  window with zero control transfers.
+
+**Also solved on 2026-10-16**, all `[VERIFIED]` unless marked otherwise:
+
+- **The reset is a USB port reset** (`libusb_reset_device`, then close and reopen the
+  handle). Without it the same command set measured 7.50 fps then 0.00 fps twice; with it,
+  7.80 / 7.50 / 7.20 — spread 0.080. Closing and reopening the handle is not a reset.
+- **The minimal sustaining set is 4 vendor OUT commands** — two assert/deassert pairs, in
+  `data/minimal_outs.json`. Dropping any one of them gives 0.00 fps. Halving the 9-command
+  parent set fails outright; leave-one-out is what works.
+- **EP 0x83 tops out at ~51 MB/s inside the device.** 1, 2 and 4 concurrent bulk transfers
+  give 52.9, 50.7 and 50.9 MB/s. The device is SuperSpeed, so it is not the bus, and a C
+  reader matches a Python reader (51.1 vs 51.6 MB/s, `dropped=0`), so it is not the client.
+- **~30 records/s is not ~30 complete frames.** 332 of 975 record gaps in a 30 s capture are
+  shorter than a full frame while every counter still advances by 1. Complete-frame ceiling
+  ≈ 27.7 fps `[INFERRED]`. A client must check each gap and discard truncated frames.
 
 Ranked next actions, highest value first:
 
-1. **Minimal sustaining command set, measured deterministically.** Arm with the full
-   417-transfer sequence, let the stream stop, then test one subset per trial behind the
-   same arm, recording frames/s, and bisect. The 27-command set in
-   `data/sustaining_outs.json` sustains 18.4 MB/s; `0xb007` writes suppress streaming; and
-   the same set measured 18.4 MB/s in one run and 1.0 MB/s in another, so **state must be
-   controlled before any minimal set is claimed**. This is the blocker for the library.
-2. **Differential register probing.** Read the whole observed address range, change one
+1. **Establish a trustworthy quiescent baseline.** Port reset, prove silence, then apply
+   commands. Until that exists, "no arm" and "no control traffic" are not clean baselines and
+   the free-running observation cannot be explained. This is the blocker for everything else.
+2. **Find what the two strobed registers gate** — `wValue=0x0006/wIndex=0x0006` and
+   `wValue=0x0009/wIndex=0x0004`. Read both before and after the strobe. The sequence is
+   reproducible; its meaning is not.
+3. **Differential register probing.** Read the whole observed address range, change one
    physical condition (cover cameras, tilt, warm up), read again. Moving addresses are
    sensor registers. Cheap, and the likely route to raw IMU.
-3. **EP 0x84 framing and units.** It now streams (88.6 MB in one session) but its frame
+4. **EP 0x84 framing and units.** It now streams (88.6 MB in one session) but its frame
    spacing is unestablished. Headset at a measured distance from a flat wall; regress values
    against distance.
-4. **EP 0x81 semantics.** Capture while actively tracking a textured scene in motion so the
+5. **EP 0x81 semantics.** Capture while actively tracking a textured scene in motion so the
    45 slots populate.
-5. **Span-base experiment.** Write a recognisable pattern across a 64-byte range, read at
+6. **Span-base experiment.** Write a recognisable pattern across a 64-byte range, read at
    many addresses/widths, map where it lands. Settles 03 §3.5.
-6. **EP 0x82.** Recheck now that streaming works — it has the largest requested URBs and has
+7. **EP 0x82.** Recheck now that streaming works — it has the largest requested URBs and has
    never returned a byte.
 
 The previously top-ranked experiment — an active WinUSB shim logging `cyapi.dll` transfers
-during steady state — is now lower value: the mechanism is understood, and what remains is a
-search over commands.
+during steady state — is now lower value: the command set is known, and what remains is what
+the commands mean.
 
 Full detail and the experiment for each: `07-open-questions.md`.
 
