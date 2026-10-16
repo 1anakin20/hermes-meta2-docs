@@ -207,18 +207,22 @@ way to settle it.
 
 | Stream | Established | Not established |
 |---|---|---|
-| `0x83` | 1280×720 mono image, 8-bit image data in the high byte of each u16, ~25 complete frames/s alone, ceiling 27.7 fps | which physical camera it comes from |
-| `0x82` | A/B record pairs, 2,032 coherent 10-bit samples each, 4,064 samples per acquisition, correlates with 0x83's scene | whether A and B are two cameras, two halves of one camera, or one camera plus something else |
-| `0x84` | 101,376 12-bit samples per frame; 352×288 matches register `0xa886`'s read-back exactly | that it is an image at all — no spatial coherence in any candidate geometry |
-| `0x81` | 256-byte status records, 233 constant bytes each | what the 23 varying fields mean |
+| `0x83` | 1280×720 mono image, 8-bit image data in the high byte of each u16, ~25 complete frames/s alone, ceiling 27.7 fps; **light-sensitive, responds to a centre-only cover (−43%)** | whether it is one camera or two, and its exact lens position |
+| `0x82` | A/B record pairs, 2,032 coherent 10-bit samples each, 4,064 samples per acquisition, correlates with 0x83's scene; **light-sensitive (saturation 0.1995 → 0.0000 under cover), responds to left and right covers, not to a centre cover; not Bayer** | whether A and B are the two side cameras, two halves of one camera, or one camera plus something else |
+| `0x84` | 101,376 12-bit samples per frame; 352×288 matches register `0xa886`'s read-back exactly; **not light-sensitive — unchanged (±0.3%) by every cover** | that it is an image at all, and whether it is a rangefinder that was simply not enabled |
+| `0x81` | 256-byte status records, 233 constant bytes each; **not light-sensitive** | what the 23 varying fields mean |
 
 The user's working model — **two monochrome cameras, one RGB camera, one Time-of-Flight
-camera** — is consistent with four bulk IN endpoints, and nothing measured so far
-contradicts it. It is **not confirmed**: no stream has been tied to a physical lens, and
-the RGB camera has not been located. `[UNKNOWN]`
+camera** — is now partly confirmed and partly contradicted. The two side positions and the
+centre position are both occupied by light-sensitive monochrome streams, which matches the
+two-monochrome-plus-one-more-camera shape. What is **not** found anywhere is colour: no
+endpoint carries Bayer, channel-sequential, or colour-phase structure, and there is no
+fifth endpoint to hide it in. `[VERIFIED]` for the absence of colour in the current
+configuration; `[UNKNOWN]` for where the vendor SDK's colour frames come from. See 8.8
+and 8.9.
 
 What static analysis cannot settle: every camera in the headset looks at the same room, so
-scene correlation cannot separate them. Occlusion can. See 8.7.
+scene correlation cannot separate them. Occlusion can, and it did — see 8.8.
 
 ---
 
@@ -241,3 +245,118 @@ Compare per endpoint per phase with the saved captures: per-record mean, saturat
 fraction (1023 for 0x82, 0x0fff for 0x84, 0xffff for 0x83) and adjacent-sample coherence.
 
 **Do not commit or publish the captures.** They are pictures of the operator's room.
+
+---
+
+## 8.8 Occlusion results — the cameras are now separated by position
+
+`re/occlusion_test2.py`, run 2026-10-16 15:59. Ten windows: prepare, then four covers each
+bracketed by a baseline. Arm **once**, readers and the 4-command strobe run continuously,
+8 s settle + 12 s measured per window, statistics accumulated per second over the whole
+window. Per second per endpoint: u16 sample mean, sentinel fraction, bytes.
+
+| window | mean 0x81 | mean 0x82 | mean 0x83 | mean 0x84 |
+|---|---|---|---|---|
+| baseline (2) | 52,374 | **577.5** | **29,042** | 2,072.4 |
+| **COVER_ALL** (3) | 53,515 | **234.7** | **13,211** | 2,079.1 |
+| baseline (4) | 52,975 | 460.1 | 22,212 | 2,073.3 |
+| **COVER_LEFT** (5) | 53,363 | **332.5** | **15,175** | 2,074.2 |
+| baseline (6) | 53,190 | 433.2 | 21,115 | 2,075.9 |
+| **COVER_RIGHT** (7) | 52,933 | **368.4** | **24,970** | 2,074.8 |
+| baseline (8) | 53,377 | 449.1 | 21,458 | 2,074.6 |
+| **COVER_MIDDLE** (9) | 53,094 | **449.5** | **12,206** | 2,076.1 |
+| baseline (10) | 53,467 | 491.6 | 23,120 | 2,077.6 |
+
+Sentinel fractions over the same windows:
+
+| endpoint | sentinel | baseline | cover_all | cover_left | cover_right | cover_middle |
+|---|---|---|---|---|---|---|
+| `0x82` | `== 1023` | 0.1995 | **0.0000** | 0.0026 | 0.0049 | 0.0048 |
+| `0x84` | `== 0x0fff` | 0.0053 | 0.0049 | 0.0051 | 0.0053 | 0.0050 |
+| `0x81`, `0x83` | — | 0.0000 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
+
+Throughput did **not** change between windows (0x82 1.63–1.79 MB/s, 0x83 3.81–4.04 MB/s,
+0x84 4.29–4.61 MB/s, 0x81 17.9–20.8 kB/s), so the value changes below are not bandwidth
+artefacts. `[VERIFIED]`
+
+### What each result means
+
+**EP 0x82 is an optical camera, and it is not in the middle.** Covering everything drops
+its mean 59.4% and takes its saturation fraction from **0.1995 to exactly 0.0000** — every
+sample that was pinned at 1023 in a lit room stops being pinned when the light goes. That
+is as clean a light-sensor signature as this project has produced. Covering only the left
+half moves it −27.7%, only the right half −15.0%, and covering **only the middle moves it
++0.1%, i.e. not at all**. `[VERIFIED]`
+
+**EP 0x83 is an optical camera, and it is the middle one.** Covering only the centre drops
+it 43.1% — nearly as much as covering the whole headset (54.5%). Covering the left half
+drops it 31.7%, consistent with a wide field of view that the left hand partly intrudes
+on. `[VERIFIED]` for the drops; `[INFERRED]` that the response pattern locates the lens
+centrally.
+
+**EP 0x83 under COVER_RIGHT went *up* 18.3%.** Unexplained. The baselines around it drift
+(29,042 → 22,212 → 21,115 → 21,458 → 23,120), and a hand entering the right side of a wide
+field of view can be a bright near object. Do not treat this number as meaningful.
+`[UNKNOWN]`
+
+**EP 0x84 is not driven by light reaching the front of the headset.** Its mean moves by at
+most 0.3% across every cover, and its `0x0fff` "no data" sentinel fraction is flat
+(0.0049–0.0054) — covering an active rangefinder should make returns vanish and the
+sentinel spike. It does not. `[VERIFIED]` That weakens the depth/ToF reading of 0x84 rather
+than supporting it, unless the subsystem was simply not enabled in this configuration.
+`[UNKNOWN]`
+
+**EP 0x81 is not optical.** Mean 52,374–53,515, ±2%, unchanged by every cover. `[VERIFIED]`
+
+### No endpoint carries colour
+
+The colour hypothesis was tested directly on EP 0x82, which had never been tested for it:
+
+| sub-stream | lag-1 | lag-2 | lag-4 | lag4 / lag1 |
+|---|---|---|---|---|
+| A (tag 0x0044) | 15.85 | 22.54 | 67.95 | **4.29** |
+| B (tag 0x0055) | 18.69 | 26.04 | 79.01 | **4.23** |
+
+A Bayer mosaic makes lag-1 *less* coherent than lag-2 and lag-4 (adjacent pixels are
+different colours), so lag4/lag1 < 1. Both sub-streams give > 4, and splitting samples by
+position mod 4 gives identical means (A: 524.1 / 525.8 / 527.1 / 524.7; B: 212.9 / 211.3 /
+212.6 / 214.0) — no colour-phase structure. `[VERIFIED]` EP 0x82 is monochrome, like 0x83.
+
+Combined with 8.2 (0x83 is not Bayer, not channel-sequential) this means: **in the
+configuration the vendor command sequence puts the device in, no bulk endpoint delivers
+colour data.** The vendor SDK nevertheless produced 1280×720 colour frames with mean
+`|R−B| = 17.4`. Where those frames come from is the open question. `[UNKNOWN]`
+
+### There is no hidden fifth endpoint
+
+Raw `GET_DESCRIPTOR(configuration)`: `wTotalLength = 70`, **one** interface (class `0xff`
+vendor-specific, alt setting 0), exactly four bulk IN endpoints `0x81`–`0x84`, each
+`wMaxPacketSize = 1024`, `bInterval = 0`, each followed by a 6-byte type `0x30` companion
+descriptor. No interrupt, isochronous or OUT bulk endpoints exist. `[VERIFIED]`
+
+### The 138 "failed" arm transfers are not lost commands
+
+Every arm reports `ok=279 fail=138` of 417 transfers. `re/arm_failures.py` shows **all 138
+failures are IN transfers** — the second IN of a pair, which stalls because the device
+produces only one response for those commands. **No OUT ever fails.** So the hypothesis
+that a colour-camera enable command is being lost in the arm is refuted: every command the
+vendor sent was accepted. `[VERIFIED]` All 138 errors are `[Errno 32] Pipe error`.
+
+---
+
+## 8.9 Next: where do the SDK's colour frames come from?
+
+The decisive experiment is to watch the vendor software produce colour and see which
+endpoint feeds it.
+
+1. Hand the headset to the VM (`vm/vm.sh usb`), start `usbmon` on the host for that bus.
+2. Run MetaReader until it emits colour frames, and save several frames with timestamps.
+3. Attribute completed bulk bytes per endpoint in the trace — **completed**, not requested;
+   05 §5.1 warns that requested URB sizes describe the software's intent, not the device.
+4. Compare a saved SDK colour frame against the candidate endpoint's stream at the same
+   instant, geometrically (edge positions, not pixel values).
+
+If colour arrives on an endpoint already known to be monochrome, the colour is being
+produced downstream of the wire — by the FPGA or by the SDK — and that changes what a
+Linux driver has to do.
+

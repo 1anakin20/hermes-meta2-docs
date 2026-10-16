@@ -156,9 +156,31 @@ which". What changed since the list above was written:
 - **The RGB camera is still not located**, and no stream has been tied to a physical lens.
   Scene correlation cannot separate cameras that all look at the same room; occlusion can.
 
-The next experiment is `re/occlusion_test.py` (08 §8.7): six timed phases covering the whole
-headset, then its left half, then its right half, with all four endpoints recorded per
-phase. It needs an operator and a live countdown page.
+### 2026-10-16 (later) — occlusion ran, and the cameras separated
+
+`re/occlusion_test2.py` (ten windows, arm once, continuous readers, per-second statistics,
+operator covering whole / left / right / middle with baselines between every cover) gave a
+clean result. Full table in `08-camera-inventory.md` §8.8.
+
+- **EP 0x82 is light-sensitive and is not central.** Cover-all drops its mean 59.4% and
+  takes its saturation fraction from 0.1995 to **exactly 0.0000**. Left cover −27.7%,
+  right cover −15.0%, **middle cover +0.1% — no response at all.**
+- **EP 0x83 is light-sensitive and is the central one.** Middle-only cover drops it 43.1%,
+  against 54.5% for cover-all. Its +18.3% under right cover is unexplained and should not
+  be trusted.
+- **EP 0x84 is not light-sensitive at all** — ±0.3% under every cover, sentinel fraction
+  flat. That weakens the depth/ToF reading unless the subsystem was never enabled.
+- **No endpoint carries colour.** EP 0x82 gives lag4/lag1 = 4.29 (A) and 4.23 (B) with
+  identical mod-4 phase means, so it is not Bayer either. In this configuration the wire
+  carries no colour, yet the vendor SDK produced colour frames — that gap is now the front
+  rank question (08 §8.9).
+- **There is no hidden fifth endpoint**: one interface, exactly four bulk IN, `wTotalLength
+  = 70`.
+- **The 138 "failed" arm transfers are all IN transfers** — the second IN of a pair. No OUT
+  ever fails, so no enable command is being lost.
+
+Next: run the vendor SDK in the VM under a host `usbmon` trace and attribute **completed**
+bulk bytes per endpoint while it emits colour frames (08 §8.9).
 
 Full detail and the experiment for each: `07-open-questions.md`.
 
