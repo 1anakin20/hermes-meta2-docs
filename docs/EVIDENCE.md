@@ -1,0 +1,134 @@
+# Evidence and reproduction
+
+How the claims in these documents were produced, and how to reproduce them.
+
+## 1. Method
+
+Two independent paths, deliberately kept separate so they can cross-check each other.
+
+**Path A — passive capture.** A Meta 2 was attached to a Windows 10 1809 virtual machine
+running the vendor's Meta SDK 2.7.0.38 and its sample reader. While that software
+streamed, the host captured every USB transfer on the physical bus via `usbmon`. This
+gives the vendor software's real command sequence and real endpoint behaviour, without
+interpreting anything.
+
+**Path B — active probing.** The device was released from the VM and driven directly from
+a Linux host with pyusb/libusb only. No Meta SDK, no Windows, no vendor driver. Every
+register value in `04-register-map.md` and every "verified against a live device" claim
+comes from this path.
+
+A claim is only marked `[VERIFIED]` if Path B reproduced it against the device, or if it
+is a direct arithmetic/statistical fact computed from a named artifact.
+
+## 2. Artifacts
+
+| Artifact | What it is |
+|---|---|
+| `data/ctrl_seq_full.json` | The complete captured start-up control sequence: 417 transfers, 138 OUT + 279 IN, in wire order, with payloads. Source for the handshake statistics in 3.1–3.2. |
+| `data/vendor_out_seq.json` | The 131 OUT transfers whose payloads were recoverable, with `wValue`/`wIndex`/`wLength`. |
+| `data/vendor_in_responses.json` | Live IN responses read from the device: `[sequence_index, wValue, wLength, hex]`. Source of the register table. |
+| `data/ep81_record0.hex` | First 256-byte EP 0x81 record, hex dump. Source for the layout in 5.2. |
+| `data/ep84_head.hex` | EP 0x84 header and trailer regions, hex dump. Source for 5.4. |
+| `data/strip_chunk0.png`, `strip_chunk1.png` | 1280×25 images rendered from raw EP 0x83 samples. Visual proof of the 1280 stride. |
+
+Large raw captures (a 21.7 MB `pcapng` of 147,874 USB frames, a 7.5 MB EP 0x81 stream, an
+8.1 MB EP 0x83 burst) are not committed here; the statistics derived from them are quoted
+inline with their counts so they can be checked against whatever you capture yourself.
+
+## 3. Reproducing the passive capture
+
+The rig itself - QEMU configuration, Windows 10 1809 install, SDK install, reader build,
+how to find the right `usbmon` device, and how to hand the device between the VM and the
+host - is documented in [appendix-capture-rig.md](appendix-capture-rig.md). The commands
+below assume that rig exists.
+
+
+```sh
+# host side: capture the bus the device sits on (bus 4 = XHCI 07:00.0 here)
+dumpcap -i usbmon3 -i usbmon4 -a duration:45 -w /tmp/meta2_trace.pcapng
+
+# while that runs, run the vendor reader in the VM (foreground, blocking)
+ssh -p 2222 hermes@<vm> 'C:\MetaReader\MetaReader.exe C:\MetaReader\OUT 40'
+```
+
+Then extract control transfers:
+
+```sh
+tshark -r meta2_trace.pcapng -Y 'usb.transfer_type==0x00 && usb.device_address==2' \
+       -T fields -e frame.number -e usb.urb_type -e usb.bmRequestType \
+       -e usb.setup.bRequest -e usb.setup.wValue -e usb.setup.wIndex \
+       -e usb.setup.wLength
+```
+
+**tshark 4.4 gotchas that cost real time, recorded so you do not repeat them:**
+
+- `frame.raw` is not a valid field. Use `-V` verbose dissection instead.
+- `-T fields` aborts the whole extraction if *any* listed field name is invalid.
+- `-c N` truncates **before** the `-Y` filter is applied, so `-c 1 -Y '...'` returns
+  nothing. Never combine them.
+- Control payloads appear in `Data Fragment` under `-V`, not in `usb.capdata`
+  (`usb.capdata` is empty for control transfers in this trace).
+- Correct setup field names: `usb.setup.bRequest`, `usb.setup.wValue`,
+  `usb.setup.wIndex`, `usb.setup.wLength`. `usb.setup.bmRequestType` does not exist;
+  use `usb.bmRequestType`.
+- `usb.urb_type` prints with quotes; naive equality filters silently return nothing.
+- Raw `usbmon` binary traces on kernel 6.12 use the **48-byte API0** record header
+  (`PKT_SZ_API0 48`), not 56 or 64. API0 has no `data_flag` field; API1 does.
+- URB ids are **not unique** — the kernel reuses them. Pair SUBMIT/COMPLETE by frame
+  sequence or timestamp, never by URB id. Frame numbers are unique.
+
+## 4. Reproducing the active probing
+
+```sh
+# release the device from the VM (QEMU, device added with an explicit id)
+echo '{"execute":"qmp_capabilities"}{"execute":"device_del","arguments":{"id":"meta2usb"}}' \
+  | socat - UNIX-CONNECT:/tmp/meta2vm.qmp
+
+# confirm it is on the host bus
+lsusb | grep 2cfa
+
+# run the documented example
+cc -O2 -Wall -o meta2_probe examples/meta2_probe.c $(pkg-config --cflags --libs libusb-1.0)
+sudo ./meta2_probe
+```
+
+To give the device back to the VM, re-add it with the same id, or restart the VM launcher.
+
+## 5. Claims that are weaker than they look
+
+Recorded explicitly, because a reader will build on these.
+
+| Claim | Actual strength |
+|---|---|
+| "EP 0x83 is 1280-wide 16-bit image data" | Strong. Autocorrelation plus rendered strips plus a mean-brightness cross-check against the SDK's own frames. But the *resolution* (1280×720) is not established — only the stride. |
+| "EP 0x84 is depth" | `[INFERRED]`. The 12-bit sentinel and smoothness support it; no stride was found and no unit mapping exists. |
+| "The register space is contiguous" | **Withdrawn.** See 3.5. A wide read returns a device-chosen span whose base is not the requested address. |
+| "All 138 OUT commands accepted" | True for the sequence as captured. 7 of the 138 had no recoverable payload, so those were replayed as zero-length OUTs — which may not be what the device actually received. |
+| "45 slots, all absent" | True for the one capture analysed (29,462 records). Never observed populated. |
+| "The device needs SuperSpeed" | Descriptor fact is `[VERIFIED]`; the practical consequence is `[INFERRED]` from `bFunctionalitySupport`. |
+| "The identity string is the SDK's serial number" | `[INFERRED]`. The reader queried it before the device had it ready and logged empty. |
+
+## 6. Environment
+
+- Host: Debian 13 (trixie), kernel 6.12.x, x86-64, XHCI USB 3 controller.
+- libusb 1.0.28, pyusb, gcc 14.
+- `tshark` / `dumpcap` 4.4.19.
+- VM: QEMU 10.0, Windows 10 1809 build 17763, Meta SDK 2.7.0.38.
+- Device firmware version: `bcdDevice 0.00` — the device reports no useful firmware
+  version, so you cannot tell which firmware these results describe. `[UNKNOWN]`
+
+## 7. Redactions
+
+One deliberate redaction: the identity string returned by command class `0x0002` is
+this project's own headset serial number. It has been replaced with `<unit-serial>` in
+the documents, and in `data/vendor_in_responses.json` the corresponding bytes of that
+one response have been replaced with `ff` padding (record length and structure are
+unchanged; only the identifying bytes are removed). Nothing else in this repo is
+redacted. No credentials, hostnames, IP addresses or SSH endpoints appear anywhere.
+
+## 8. What was not available
+
+A web search for the Meta 2's published hardware specifications returned **no results**
+from the configured search backend while these documents were written. No external
+specification is cited anywhere in this repo. Every claim is device-derived. If you have
+the vendor's published specs, reconcile them against `01-device.md` section 1.6.
