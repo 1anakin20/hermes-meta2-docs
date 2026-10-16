@@ -4,7 +4,8 @@ All sensor data arrives on the four bulk IN endpoints. There is no bulk OUT.
 
 ## 5.1 Endpoint behaviour
 
-Measured with a no-SDK libusb client after replaying the vendor start-up sequence:
+Measured with a no-SDK libusb client after replaying the vendor start-up sequence. These
+are what a **handshake-then-read** client gets:
 
 | Endpoint | Bytes per trigger cycle | Content |
 |---|---|---|
@@ -14,6 +15,10 @@ Measured with a no-SDK libusb client after replaying the vendor start-up sequenc
 | `0x84` | 65,536 | 12-bit field with `0x0FFF` invalid sentinel (5.4) |
 
 `[VERIFIED]` — reproduced across repeated trigger cycles.
+
+**Those figures are a property of the client, not of the device.** With bulk reads already
+pending on the endpoints *while* the control sequence runs, the same device delivers 100 to
+155 full 1280x720 frames per 12 s on EP 0x83. See 5.3 and 5.5. `[VERIFIED]`
 
 The vendor software's own URB sizes (from a passive capture) were larger: 16,384 B
 requested on EP 0x81, 262,144 B on EP 0x82, 131,072 B on EPs 0x83 and 0x84. EP 0x81
@@ -138,37 +143,47 @@ show a smooth vertical gradient, with row means 15,704 → 18,801 → 19,626 →
 19,991 → 20,157 → 20,298 → 20,363, and the same gradient repeats across blocks. A
 random or non-image buffer does not produce that. `[VERIFIED]`
 
-### Block trailer
+### The frame record — 1,843,232 bytes per frame
 
-Each 65,536-byte block ends with a 48-byte record at offset 65,488:
+Visible only once bulk reads are kept pending during the control sequence (5.5). From a
+93,880,320-byte capture: 51 frame records, spaced by exactly **1,843,232 bytes =
+1280 x 720 x 2 + 32**. `[VERIFIED]`
+
+EP 0x83 therefore carries **whole 1280x720 16-bit frames**, each followed by a 32-byte
+record:
 
 ```
-+65488  ba ab ed fe        magic
-+65492  u16 51, u16 51
-+65496  ef be ad de        magic (0xDEADBEEF)
-+65504  u32 0xDADDF00D
-+65508  u32 0
-+65512  u32 counter        3759, 3760, 3761 in three consecutive blocks -> +1 per block
-+65516  12 x u16           values ~6,000-10,000, varying
++0    ba ab ed fe        magic
++4    u16 51, u16 51
++8    ef be ad de        magic (0xDEADBEEF)
++12   u32 0xDADDF00D     little-endian on the wire
++16   u32 0
++20   u32 counter        102, 103, ... 152 — +1 per frame, monotonic across all 51
++24   4 x u16            (18345, 25689, 28331, 32322), (19879, 26710, 29866, 32832),
+                         (18853, 26199, 28587, 32323) — meaning [UNKNOWN]
 ```
 
 `[VERIFIED]`
 
-The counter incrementing by exactly 1 per block means **each block is one numbered
-acquisition unit**, not an arbitrary slice. `[VERIFIED]`
+50 complete frames were recovered from that capture. Frame 0 versus frame 1: sampled mean
+`|diff|` = 1,022 with only **3.8%** of samples identical. Distinct acquisitions, not one
+repeated buffer. `[VERIFIED]`
 
-So a block is 32,744 sample slots (bytes 0..65,487) plus a 24-slot / 48-byte record
-(bytes 65,488..65,535). 32,744 / 1280 = **25.58 rows**, so a block does not contain a
-whole number of rows. `[VERIFIED]` arithmetic.
+### Withdrawn: the 65,536-byte "block" model
 
-### Blocks are independent acquisitions
+The earlier reading — "each 65,536-byte block = 32,744 sample slots + a 48-byte trailer at
+byte 65,488, so a block is 25.58 rows, and blocks are independent acquisitions that cannot
+be concatenated" — is **withdrawn**. It measured the URB size of a handshake-then-read
+client, not the device's framing. Evidence for the withdrawal: `[VERIFIED]`
 
-Consecutive blocks are **not** consecutive slices of one frame: the difference across a
-block boundary (11,331) is an order of magnitude larger than the within-row difference
-(1,112). `[VERIFIED]`
+- With pending bulk URBs, the same magics (`baabedfe`, `efbeadde`, `0xDADDF00D`, the
+  `u16 51, 51` pair) appear once per 1,843,232 bytes, not once per 65,536.
+- The counter in that record advances once per **frame**, not once per 65,536-byte URB.
+- The spacing is exactly one 1280x720 16-bit frame plus 32 bytes, with no remainder. The
+  "25.58 rows, not a whole number of rows" observation was an artefact of cutting the
+  stream at URB boundaries.
 
-This is important: you cannot concatenate blocks and get a taller image. Each block is a
-separate acquisition.
+The autocorrelation result (row stride 1280) is unaffected and stands.
 
 ## 5.4 EP 0x84 — the 12-bit field
 
@@ -216,13 +231,25 @@ them to distances yet. `[UNKNOWN]`
 
 ## 5.5 Throughput
 
-Re-triggering the control handshake in a loop: **145 cycles in 40.4 s = 8,126,464 bytes
-= 197 KB/s** on EP 0x83. `[VERIFIED]`
+**Handshake-then-read** — one synchronous read per endpoint after each trigger: 145 cycles
+in 40.4 s = 8,126,464 bytes = **197 KB/s** on EP 0x83. `[VERIFIED]`
 
-For comparison, a 1280×720 16-bit frame is 1,843,200 bytes ≈ 28 blocks. At 197 KB/s the
-observed rate is about **6.5 blocks' worth per second**, i.e. roughly a quarter of one
-frame per second if blocks were slices — which they are not (5.3).
+**Pending-URB client** — a looping reader per endpoint, started *before* the control
+sequence and left running: `[CAPTURED]`
 
-The vendor SDK delivered 141 RGB frames in a 45-second session (~3.1 fps of full
-1280×720 frames). `[CAPTURED]` The device is therefore capable of far more than the
-no-SDK client currently extracts; the gap is the streaming trigger, not the bus.
+| Control pattern kept running | Frames of 1,843,232 B | MB/s | fps |
+|---|---|---|---|
+| Last 100 transfers of the 417, looped | 154.7 | 21.03 | 11.4 |
+| 27 unique tail OUTs, no INs, no `0xb007` | 100.1 | 18.42 | 10.0 |
+| Full 417-transfer sequence, looped | 52.9 | 5.13 | 2.8 |
+| 30 unique OUTs **including** `0xb007` writes | 7.4 | 1.37 | 0.6 |
+| All 138 OUTs in original order, no INs | 0.0 | 0.00 | 0.0 |
+| One `3d40b0070180` repeated 7,273 times | 0.0 | 0.00 | 0.0 |
+| No control traffic at all | 0.07 | 0.01 | 0.0 |
+
+EP 0x84 streamed concurrently in the same runs (88.6 MB in one 62 s session). Its frame
+spacing has **not** been established. `[UNKNOWN]`
+
+The vendor SDK delivered 141 RGB frames in a 45 s session (~3.1 fps). `[CAPTURED]` The
+no-SDK client now exceeds that. **The gap was never the bus and never a missing command —
+it was that no URB was pending when the device's buffer filled.**

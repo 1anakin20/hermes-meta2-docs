@@ -1,0 +1,5 @@
+# EP 0x83 frame record, 32 bytes, three consecutive frames (little-endian fields)
+# spacing between records: 1,843,232 bytes = 1280*720*2 + 32
+frame 0  offset   1963856  baabedfe33003300efbeadde0df0ddda0000000066000000a9475964ab6e427e
+frame 1  offset   3807088  baabedfe33003300efbeadde0df0ddda0000000067000000a74d5668aa744080
+frame 2  offset   5650320  baabedfe33003300efbeadde0df0ddda0000000068000000a5495766ab6f437e

@@ -93,35 +93,47 @@ libusb_control_transfer(h, 0xC0, 0xC0, 3, 1, rsp, 1, 600);   /* completion */
 
 Response length is `N + 1` in 70 of 70 observed reads. `[VERIFIED]`
 
-## 6.6 Reading a camera block
+## 6.6 Reading the camera — the shape that actually works
 
-A trigger cycle is: replay the vendor command sequence, then read the bulk endpoints.
-Per cycle you get `[VERIFIED]`:
+**Start the bulk readers first, then run control traffic.** This is the single most
+important thing in this document. A client that replays the command sequence and *then*
+reads gets one 65,536-byte URB per endpoint and concludes the device cannot stream. A
+client that keeps a looping reader on each endpoint and runs control traffic around it gets
+whole frames at 10 fps or more. `[VERIFIED]`
 
 ```
-EP 0x81  1,024 bytes   tracking records
-EP 0x83 65,536 bytes   1280-wide 16-bit image samples + 48-byte trailer
-EP 0x84 65,536 bytes   12-bit field + header/trailer
-EP 0x82       0 bytes
+reader thread per endpoint:  loop { read(EP, 262144, timeout) }   <- started first
+main thread:                 loop { send the control subset }      <- data flows only here
 ```
 
-To render an EP 0x83 block:
+Rules that follow from the measurements: `[VERIFIED]`
+
+- **One process, one thread per endpoint.** Two processes cannot both claim interface 0;
+  the second bulk reader dies with `LIBUSB_ERROR_BUSY`. Threads inside one process work.
+- **Data stops when control traffic stops.** The device is not free-running once armed;
+  keep the control subset looping for the whole session.
+- A bulk read timeout between frames is normal. Treat it as "no frame yet", not as an
+  error.
+
+Frames on EP 0x83 are delimited by the 32-byte record in 5.3. To render one:
 
 ```c
-/* block is 65536 bytes; the last 48 are a metadata record */
-uint16_t *px = (uint16_t *)block;
-int samples = (65536 - 48) / 2;          /* 32,744 sample slots */
-for (int i = 0; i < samples; i++) {
+/* frame = 1280*720*2 = 1,843,200 bytes of little-endian u16, followed by a
+   32-byte record beginning ba ab ed fe */
+uint16_t *px = (uint16_t *)frame;
+for (int i = 0; i < 1280 * 720; i++) {
     int row = i / 1280, col = i % 1280;
-    out[row * 1280 + col] = px[i] >> 8;  /* 16-bit -> 8-bit for display */
+    out[row * 1280 + col] = px[i] >> 8;      /* 16-bit -> 8-bit for display */
 }
 ```
 
-**Note on the arithmetic, stated precisely:** a block is 32,768 u16 slots. The trailer
-record occupies bytes 65,488..65,535 (24 slots), leaving 32,744 sample slots = 25.58
-rows of 1280, so a block does **not** contain a whole number of rows. `[VERIFIED]` A block is one numbered acquisition unit, and consecutive blocks are not
-consecutive slices of a frame (cross-boundary difference 11,331 vs within-row 1,112).
-`[VERIFIED]` You cannot assemble a taller image by concatenating blocks.
+**Stated precisely:** this snippet follows the framing established in 5.3, but it was not
+compiled and run as part of a worked example the way `examples/meta2_probe.c` was. Treat it
+as the documented shape, not as verified program output. `[INFERRED]`
+
+**Withdrawn:** the earlier "65,536-byte block = 32,744 sample slots + 48-byte trailer =
+25.58 rows, blocks are independent acquisitions you cannot concatenate" description. It
+measured URB size, not device framing. See 5.3.
 
 ## 6.7 Pitfalls, each one learned the hard way
 
@@ -134,6 +146,9 @@ consecutive slices of a frame (cross-boundary difference 11,331 vs within-row 1,
 | Assuming URB boundaries align with EP 0x81 records | garbage framing | resynchronise on the `45 00 00 ea` tag |
 | Trusting URB sizes to infer the endpoint map | wrong endpoint map | EP 0x82 has the biggest URBs and returns nothing |
 | Another process holding the device | libusb cannot open it | check for a VM with USB passthrough before blaming drivers |
+| Two bulk readers in two processes | second one fails with `LIBUSB_ERROR_BUSY` | one process, one thread per endpoint |
+| Handshake, then read | 65,536 bytes and silence; looks like the device cannot stream | keep readers pending *during* control traffic |
+| Stop the control traffic mid-session | the stream dies within seconds | keep the control subset looping |
 | Concluding "needs a proprietary driver" from a failed open | dead end | the device binds no kernel driver; it is a host-environment problem |
 
 ## 6.8 Reproducing the captures

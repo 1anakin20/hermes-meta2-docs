@@ -12,7 +12,10 @@ every Meta 2 sensor and camera directly, with no Meta SDK, no Windows requiremen
 better performance and currency than the vendor's software.
 
 **Current phase:** understand the device completely enough to build that library. The
-protocol layer is cracked; the streaming trigger is not.
+protocol layer is cracked **and continuous full-frame streaming now works with no SDK**
+(2026-10-16) at 10-11 fps on EP 0x83, above the vendor SDK's ~3.1 fps. What remains is
+identifying the minimal sustaining command set and what the registers and remaining streams
+mean.
 
 **The device is Meta (Metavision Inc.), USB `2cfa:00f3`. It has nothing to do with
 Facebook/Meta Platforms or Oculus.** Never describe it as an Oculus/Facebook device, and
@@ -58,53 +61,64 @@ These are `[VERIFIED]` against a live device. Re-confirming them wastes a sessio
   03 §3.5. Do not reintroduce it.
 - **Identity string** is readable via `wValue=0x0002` even though `iSerial = 0`. Format:
   17 ASCII chars starting `META2D`. The test unit's actual value is redacted repo-wide.
-- **EP 0x83 is 1280-wide 16-bit image data.** Row stride 1280 proven by autocorrelation
-  (lag 1 → 1096, lag 1280 → 1342, lag 1312 → 4202, lag 2048 → 14089). Each 65,536-byte
-  block = 32,744 sample slots + a 24-slot trailer at byte 65,488, with a per-block counter
-  incrementing by 1. Blocks are independent acquisitions, **not** consecutive slices.
+- **EP 0x83 carries whole 1280×720 16-bit frames.** Frame records are spaced by exactly
+  **1,843,232 B = 1280×720×2 + 32**, and the 32-byte record's counter increments by 1 per
+  frame (102 → 152 across 51 markers). The earlier "65,536-byte block = 32,744 samples +
+  trailer at 65,488, 25.58 rows" model is **withdrawn** — it measured URB size, not device
+  framing. See 05 §5.3. Row stride 1280 (autocorrelation) still stands.
 - **EP 0x81** delivers 256-byte records: tag `45 00 00 ea`, 45-slot table (`0x00..0x2C`,
   `0xFFFFFF` = absent), magics `baabedfe`/`efbeadde`/`abbaedfe`, sentinel `0xDADDF00D`.
   All 45 slots were absent in all 29,462 records analysed.
 - **EP 0x84** is a 12-bit field with `0x0FFF` = no data, body values clustered 2017–2033.
   Depth interpretation is `[INFERRED]`, units unknown.
 - **EP 0x82 returns nothing**, despite having the largest requested URBs.
-- **Throughput achieved without the SDK:** 145 trigger cycles / 40.4 s = 8,126,464 B =
-  197 KB/s on EP 0x83.
+- **Throughput achieved without the SDK:** up to **21 MB/s ≈ 11.4 fps on EP 0x83** with
+  bulk URBs kept pending during control traffic. The old 197 KB/s figure was what a
+  handshake-then-read client gets.
 
 Details, numbers and evidence: `03-control-protocol.md`, `04-register-map.md`,
 `05-data-streams.md`, `EVIDENCE.md`.
 
 ---
 
-## 4. The blocking problem
+## 4. The blocking problem is solved — and what replaced it
 
-**One trigger cycle yields one 64 KB burst per endpoint. Continuous full-frame streaming
-has not been achieved.** The vendor SDK produced 141 full 1280×720 frames in 45 s from the
-same device, so the capability exists.
+**Bulk streaming works.** The requirement is that bulk URBs are already **pending** on the
+endpoints while control traffic is in flight. Handshake-then-read yields one 65,536-byte URB
+per endpoint; a looping reader per endpoint, started before the control sequence, yields
+100-155 whole 1280×720 frames per 12 s. `[VERIFIED]`
 
-Already ruled out by experiment: IN-only polling (0 bytes), each OUT individually (0), a
-single OUT+IN pair (0), the `wValue=0x0004` `0c00/0d00/0c01/0d01` quad alone (0), one huge
-bulk URB with a long timeout (65,536 then nothing). The **full interleaved 417-transfer
-sequence** is what produces a burst.
+Two hard constraints, both `[VERIFIED]`:
+
+- **One process, one thread per endpoint.** Two processes cannot both claim interface 0; the
+  second bulk reader fails with `LIBUSB_ERROR_BUSY`.
+- **Data flows only while control transfers run.** With no control traffic the endpoints go
+  silent within seconds. The device is not free-running once armed.
 
 Ranked next actions, highest value first:
 
-1. **Active interception of the vendor software while it is already streaming steadily.**
-   A WinUSB shim in the VM that logs every transfer `cyapi.dll` makes, *including payloads*.
-   Our passive capture lost 7 of 138 OUT payloads and all control-IN payloads. This is the
-   highest-value single experiment in the project.
-2. **Test concurrent control + bulk.** Replay the handshake *while* bulk reads are blocked
-   on the endpoints, rather than handshake-then-read. The vendor software polls continuously
-   throughout a stream; our client does not.
-3. **Differential register probing.** Read the whole observed address range, then change one
+1. **Minimal sustaining command set, measured deterministically.** Arm with the full
+   417-transfer sequence, let the stream stop, then test one subset per trial behind the
+   same arm, recording frames/s, and bisect. The 27-command set in
+   `data/sustaining_outs.json` sustains 18.4 MB/s; `0xb007` writes suppress streaming; and
+   the same set measured 18.4 MB/s in one run and 1.0 MB/s in another, so **state must be
+   controlled before any minimal set is claimed**. This is the blocker for the library.
+2. **Differential register probing.** Read the whole observed address range, change one
    physical condition (cover cameras, tilt, warm up), read again. Moving addresses are
-   sensor registers. This is cheap and would likely locate raw IMU.
-4. **Span-base experiment.** Write a recognisable pattern across a 64-byte range, read at
-   many addresses/widths, map where it lands. Settles 03 §3.5.
-5. **EP 0x84 units.** Headset at a measured distance from a flat wall; regress body values
+   sensor registers. Cheap, and the likely route to raw IMU.
+3. **EP 0x84 framing and units.** It now streams (88.6 MB in one session) but its frame
+   spacing is unestablished. Headset at a measured distance from a flat wall; regress values
    against distance.
-6. **EP 0x81 semantics.** Capture while actively tracking a textured scene in motion so the
+4. **EP 0x81 semantics.** Capture while actively tracking a textured scene in motion so the
    45 slots populate.
+5. **Span-base experiment.** Write a recognisable pattern across a 64-byte range, read at
+   many addresses/widths, map where it lands. Settles 03 §3.5.
+6. **EP 0x82.** Recheck now that streaming works — it has the largest requested URBs and has
+   never returned a byte.
+
+The previously top-ranked experiment — an active WinUSB shim logging `cyapi.dll` transfers
+during steady state — is now lower value: the mechanism is understood, and what remains is a
+search over commands.
 
 Full detail and the experiment for each: `07-open-questions.md`.
 
@@ -124,6 +138,14 @@ Full detail and the experiment for each: `07-open-questions.md`.
   Use `ps -eo pid,comm | awk '$2 ~ /^qemu/'`.
 - **If libusb enumerates 0 devices on the host**, the cause is a VM holding the device or a
   container without `usbfs` — not a driver problem. Check before theorising.
+- **A second bulk reader in a second process fails with `Resource busy`.** Only one process
+  can claim interface 0. Threads inside one process are the correct shape.
+- **A 65,536-byte read that then goes silent is not the device's limit.** It means no URB
+  was pending when the buffer filled. Fix the client before concluding anything about the
+  device.
+- **Streaming results are hysteretic.** The same command set gave 18.4 MB/s and 1.0 MB/s in
+  two runs depending on prior state. Re-arm identically before every trial or the number is
+  meaningless.
 - **tshark 4.4 field-name traps** are listed in `EVIDENCE.md` §3. Read them first; they cost
   hours otherwise. `frame.raw` invalid; `-c` truncates before `-Y`; control payloads are in
   `Data Fragment` not `usb.capdata`; URB ids are reused by the kernel so never pair

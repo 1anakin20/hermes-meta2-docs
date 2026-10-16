@@ -3,17 +3,24 @@
 Each item states what is known, what is not, and the specific experiment that would
 close it. Nothing here is hand-waved.
 
-## 7.1 The streaming trigger — the blocking problem
+## 7.1 The streaming trigger — SOLVED 2026-10-16
 
-**Known:** replaying the vendor start-up sequence (138 OUT + 279 IN, in order) causes the
-device to produce exactly one burst per cycle: 1 KB on EP 0x81, 64 KB on EP 0x83, 64 KB on
-EP 0x84. Re-triggering yields 197 KB/s sustained. `[VERIFIED]`
+**Solved:** continuous full-frame streaming works with no SDK. The requirement is that bulk
+URBs are already **pending** on the endpoints while control traffic is in flight. A
+handshake-then-read client gets one 65,536-byte URB per endpoint; a client that keeps a
+looping reader on each endpoint running gets 100 to 155 full 1280x720 frames per 12 s.
+`[VERIFIED]`
 
-**Not known:** which command switches the device to continuous full-frame streaming. The
-vendor SDK produced 141 full 1280×720 frames in 45 s from the same device, so the
-capability exists. `[CAPTURED]`
+Data flows **only while control transfers are running**. With zero control traffic the
+endpoints go silent within seconds — the device is not free-running once armed.
+`[VERIFIED]`
 
-**What has been ruled out, by experiment:** `[VERIFIED]`
+Concurrency shape: **one process, one thread per endpoint.** Two processes cannot both
+claim interface 0; the second bulk reader fails with `LIBUSB_ERROR_BUSY`. `[VERIFIED]`
+
+The ruled-out table below still stands, but its interpretation changes: every one of those
+experiments read *after* arming, so "0 bytes" measured the client, not the device.
+`[VERIFIED]`
 
 | Hypothesis tested | Result |
 |---|---|
@@ -22,26 +29,27 @@ capability exists. `[CAPTURED]`
 | A single OUT + IN pair | 0 bytes |
 | The `wValue=0x0004` enable quad `0c00 / 0d00 / 0c01 / 0d01` alone | 0 bytes |
 | One large bulk URB with a long timeout | 65,536 bytes, then nothing |
-| **Full interleaved OUT+IN sequence** | **65,536 bytes** |
+| Full interleaved OUT+IN sequence | 65,536 bytes |
+| **Pending bulk URBs + control traffic in flight** | **100-155 full frames per 12 s** |
 
-**Remaining hypotheses, in the order worth testing:**
+**What is still open:** `[UNKNOWN]`
 
-1. A register write whose value encodes frame geometry (width, height, row stride). The
-   candidates are the wide writes: `0xc2bc` (40 B), `0xb00e` (21 B), `0xa893` (18 B),
-   `0xbff8` (16 B), `0xb062` (16 B). `[INFERRED]`
-2. A command present in the vendor sequence that the passive capture lost. 7 of 138 OUTs
-   had no recoverable payload, and two (`wValue=0x0007`, `0x00FD`) look zero-length, which
-   is suspicious. `[UNCERTAIN]`
-3. Continuous streaming requires the control handshake to run *concurrently* with bulk
-   reads rather than before them. The vendor software keeps polling throughout a stream;
-   our client replays once, then reads. `[INFERRED]`
+1. **The sustaining command set is not a single command.** The 27 unique OUTs from the last
+   100 transfers of the captured sequence sustain 18.4 MB/s with no vendor INs at all, once
+   the `0xb007` writes are removed (`data/sustaining_outs.json`). Replaying all 138 OUTs in
+   their original order sustains nothing. `[CAPTURED]`
+2. **`0xb007` writes suppress streaming.** Same set with them: 7.4 frames in 10 s. Without
+   them: 100.1 frames. `[CAPTURED]` What `0xb007` gates is not known.
+3. **Results are state-dependent.** The identical 27-command set produced 18.4 MB/s in one
+   run and 1.0 MB/s in another, depending on what had armed the device beforehand. No
+   minimal command set can be claimed until trials run behind a deterministic arm-then-test
+   reset. `[VERIFIED]` that the variance exists; `[UNKNOWN]` what governs it.
 
-**Experiment that would settle it:** capture the vendor software's control traffic
-*while it is already streaming steadily*, not only during start-up. Our capture covers
-start-up plus steady state, but the control payloads during steady state were only
-partially recoverable from a passive capture. An active man-in-the-middle on the VM side
-— a WinUSB shim that logs every transfer the vendor DLL makes, including payloads — would
-give the complete picture in one run. That is the highest-value next step.
+**Experiment that would settle the remainder:** arm with the full 417-transfer sequence,
+let the stream stop, then test one candidate subset at a time with the same arm before
+every trial, recording frames/s per subset, and bisect from there. The previously proposed
+active WinUSB shim logging `cyapi.dll` transfers during steady state is now lower value:
+the mechanism is understood and what remains is a search over commands.
 
 ## 7.2 What the registers mean
 
