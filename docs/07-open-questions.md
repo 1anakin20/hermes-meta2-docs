@@ -92,16 +92,30 @@ Meta 2's stereo tracking cameras stream, EP 0x82 is the leading candidate for on
 
 ## 7.5 EP 0x84 geometry and units
 
-**Known:** 12-bit field, `0x0FFF` = no data, body values tightly clustered around
-2017–2033 in one capture, a few values above 4095, `1312` present as an explicit header
-field. `[VERIFIED]`
+**Known:** frames of 202,784 bytes (record 32 + payload 202,752); a 696-byte header that is
+byte-identical across all 435 frames; 101,028 samples of image data; 16-bit containers
+holding 12-bit values (2 samples in 101,376 exceed 4095); `0x0FFF` as an explicit no-data
+sentinel, all 339 occurrences inside the header in this capture; body mean 2,066.7.
+`[VERIFIED]` See 5.4.
 
-**Not known:** resolution, row stride (autocorrelation found none), and the mapping to
-distance.
+**Not known:** the row stride and image dimensions, and the mapping to distance.
+Autocorrelation gives only an 18% contrast (29.0 at lag 704 against a 35.4 random baseline),
+where the same test on EP 0x83 gives 95%. 704 is the leading candidate because 352 / 704 /
+1408 / 2112 form a harmonic family and 704 × 144 equals the payload sample count exactly.
+`[INFERRED]`
 
-**Experiment:** place the headset at a measured distance from a flat wall, capture EP
-0x84, and regress body values against known distance. One run gives you the units or
-proves the field is not range at all.
+**Withdrawn:** the earlier "`1312` present as an explicit header field" observation — it came
+from a URB-sized slice, not from a frame boundary. `[VERIFIED]`
+
+**Experiments, in order:**
+
+1. **Geometry without the operator.** Capture EP 0x84 while the headset faces a high-contrast
+   edge (a doorway, a wall meeting open floor) at a known angle. A real 2D grid makes the
+   edge appear as a straight line at some row offset; scanning candidate strides for the one
+   that renders that line straight is decisive where flat-scene autocorrelation is not.
+2. **Units.** Headset at measured distances (0.5 m, 1.0 m, 1.5 m, 2.0 m) from a flat wall,
+   one capture per distance, regress body values against distance. One run gives the units or
+   proves the field is not range at all.
 
 ## 7.6 EP 0x81 record semantics
 

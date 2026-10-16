@@ -94,7 +94,19 @@ sudo ./meta2_probe
 
 To give the device back to the VM, re-add it with the same id, or restart the VM launcher.
 
-## 5. Claims that are weaker than they look
+## 5. Methods that do not work here
+
+Recorded because they look reasonable and produce confident-looking numbers.
+
+**Row-boundary discontinuity test — invalid on this data.** For a candidate width `W`,
+compare `mean |v[i]-v[i+1]|` at row boundaries (`i+1 ≡ 0 mod W`) against within-row
+positions. Tested as a control against EP 0x83, whose stride 1280 is independently
+established: the method ranked 1280 at **3692 of 3969 candidates** and instead promoted
+2363, 3199 and 4096 — artefacts of small sample counts at large `W`. Do not use it. The
+autocorrelation lag scan (5.3, 5.4) is the method that works, and it must be reported
+against a random-pair baseline, not in absolute terms.
+
+## 6. Claims that are weaker than they look
 
 Recorded explicitly, because a reader will build on these.
 
@@ -110,7 +122,7 @@ Recorded explicitly, because a reader will build on these.
 | "The device needs SuperSpeed" | Descriptor fact is `[VERIFIED]`; the practical consequence is `[INFERRED]` from `bFunctionalitySupport`. |
 | "The identity string is the SDK's serial number" | `[INFERRED]`. The reader queried it before the device had it ready and logged empty. |
 
-## 6. Environment
+## 7. Environment
 
 - Host: Debian 13 (trixie), kernel 6.12.x, x86-64, XHCI USB 3 controller.
 - libusb 1.0.28, pyusb, gcc 14.
@@ -119,7 +131,7 @@ Recorded explicitly, because a reader will build on these.
 - Device firmware version: `bcdDevice 0.00` — the device reports no useful firmware
   version, so you cannot tell which firmware these results describe. `[UNKNOWN]`
 
-## 7. Redactions
+## 8. Redactions
 
 One deliberate redaction: the identity string returned by command class `0x0002` is
 this project's own headset serial number. It has been replaced with `<unit-serial>` in
@@ -128,7 +140,7 @@ one response have been replaced with `ff` padding (record length and structure a
 unchanged; only the identifying bytes are removed). Nothing else in this repo is
 redacted. No credentials, hostnames, IP addresses or SSH endpoints appear anywhere.
 
-## 8. What was not available
+## 9. What was not available
 
 A web search for the Meta 2's published hardware specifications returned **no results**
 from the configured search backend while these documents were written. No external

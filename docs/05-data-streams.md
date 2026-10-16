@@ -187,47 +187,80 @@ The autocorrelation result (row stride 1280) is unaffected and stands.
 
 ## 5.4 EP 0x84 — the 12-bit field
 
-One 65,536-byte block per trigger cycle. `[VERIFIED]`
+**Frame size: 202,784 bytes.** With bulk reads kept pending (5.5), the stream resolves into
+435 frames whose frame records are spaced by exactly **202,784 = 202,752 + 32**. 435 of the
+441 record-to-record gaps in an 88,604,672-byte capture hold that value; the exceptions are
+four records 32 bytes apart at the start and two partial frames at the end. `[VERIFIED]`
 
-Header region:
-
-```
-+0    u32            varying
-+4    ba ab ed fe    magic
-+8    u16 34, u16 34
-+12   ef be ad de    magic
-+16   u32 0xDADDF00D
-+20   u32 0
-+24   u32            varying
-+28   u16 0, u16 22
-+32   u16 1312, u16 0     <- 1312 appears as an explicit field value
-+36   ... 0x0FFF repeated  <- invalid / no-data entries
-```
-
-`[VERIFIED]`
-
-Body statistics (offsets 64..65487, 32,712 u16 values):
+Frame record (32 bytes), same shape as EP 0x83's:
 
 ```
-min 0   max 46,532   mean 2,051.5
-values equal to 4095 (0x0FFF): 325
-values above 4095: 2
-most common values: 2017, 2021, 2023, 2025, 2026, 2027, 2029, 2030, 2032, 2033
++0    ba ab ed fe        magic
++4    u16 34, u16 34     (EP 0x83 carries 51, 51 in this slot)
++8    ef be ad de        magic (0xDEADBEEF)
++12   u32 0xDADDF00D
++16   u32 0
++20   u32 counter        224399 -> 224851; +1 in 420 of 434 transitions, +2 in 12, +3 in 1
++24   u32                advances by exactly 8,388,609 = 2^23 + 1 per frame in 347 of 434
+                         transitions, with wrap discontinuities in the rest. Meaning
+                         [UNKNOWN]; it is timestamp-like.
++28   u16 288            6 distinct values across 435 frames
++30   u16                9 distinct values across 435 frames
 ```
 
 `[VERIFIED]`
 
-The body is a tightly clustered field (adjacent values differ by ~5) with `0x0FFF` used
-as an explicit "no data" sentinel. `[VERIFIED]`
+Payload = 202,752 bytes = 101,376 u16 samples, split as:
 
-Interpretation as **depth / range data**: `[INFERRED]`. Supporting: the 12-bit sentinel,
-the tight spatial smoothness, and the presence of a point-cloud API in the vendor SDK.
-Contradicting or at least unresolved: the field is **not** uniformly 12-bit (a few
-values exceed 4095), and autocorrelation shows no clean 1280 stride here (lag 1 → 5.4,
-lag 1280 → 8.5), so its geometry is not established.
+- **Header: the first 696 bytes (348 samples) are byte-identical across all 435 frames.**
+  Sample 0 is `0x0000`; the rest are `0x0FFF` with a handful slightly below (4091, 4031,
+  4094, 3839, 3551, 3519, 2303, 1983). `[VERIFIED]`
+- **Image region: 202,056 bytes = 101,028 samples.** `[VERIFIED]`
 
-**The mapping from these numbers to metres is not known.** Do not attempt to convert
-them to distances yet. `[UNKNOWN]`
+Field statistics over the payload:
+
+```
+values above 4095: 2 of 101,376      -> 16-bit containers holding 12-bit values
+values equal to 4095 (0x0FFF): 339, the same count in all 200 frames sampled,
+                                 and every one of them lies inside the 696-byte header
+mean 2,066.7                          body values tightly clustered
+```
+
+`[VERIFIED]`
+
+Consecutive frames differ in 99.4% of sampled values; frames 15 apart differ in 89.5%. This
+is live data, not a repeated buffer. `[VERIFIED]`
+
+### Withdrawn: the 65,536-byte block reading of EP 0x84
+
+The earlier description — a 65,536-byte block with a header beginning at +4, containing
+`u16 1312` as an explicit field — is **withdrawn**. It was a URB-sized slice of the
+202,784-byte frame above, cut at an arbitrary point. `[VERIFIED]`
+
+### Geometry: not established
+
+Autocorrelation of the image region finds essentially no structure:
+
+| Lag | Mean abs difference |
+|---|---|
+| 352 | 31.11 |
+| 704 | 29.00 |
+| 1056 | 31.76 |
+| 1408 | 28.90 |
+| 2112 | 30.99 |
+| random pair | 35.4 |
+
+For contrast, the same measurement on EP 0x83 gives **1,012 at the known stride 1280 against
+a random-pair baseline of 21,100** — a 95% drop. Here the best minimum is 18% below
+baseline. The 352 / 704 / 1408 / 2112 family is harmonic, and 704 × 144 = 101,376 matches
+the payload sample count exactly, so **704 is the leading candidate stride** — but the
+evidence is far too weak to claim it. `[INFERRED]`; treat the geometry as `[UNKNOWN]`.
+
+Interpretation as **depth / range data** remains `[INFERRED]`: the 12-bit sentinel, the
+tight clustering and the vendor SDK's point-cloud API support it, and nothing confirms it.
+
+**The mapping from these numbers to metres is not known.** Do not attempt to convert them
+to distances yet. `[UNKNOWN]`
 
 ## 5.5 Throughput
 
