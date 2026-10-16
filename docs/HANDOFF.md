@@ -200,10 +200,12 @@ claim below was then re-verified against captures we already had. **New document
   mono1 tag `0x55`, interleaved one 4,096-byte URB at a time. Assembled per the driver's
   own scanner it gives 5.76 complete frames per 4.16 MB, trailer delta exactly 721,952,
   coherence 27–52× better than random, 10-bit values (max 1023). `[VERIFIED]`
-- **EP 0x84 is the ToF camera, 352 × 288, and it *is* coherent** — the earlier "no spatial
-  coherence" was `np.diff` wrapping on `uint16`. 435 frames, 36–38× better than random,
-  values clustered 2017–2033. `[VERIFIED]` Coherence is not the same as ranging; whether it
-  measures distance is still `[INFERRED]`.
+- **EP 0x84 is the ToF camera, 352 × 288, and it carries no scene information.** The
+  "36–38× coherent" figure was a bad baseline (uniform 12-bit random vs a narrow-band
+  payload); against a permutation baseline it is 1.0×. What persists across frames is a
+  fixed pattern: corr(frame, temporal mean) = 0.986, corr(ToF, mono0 in the same window)
+  ≈ 0.0, occlusion-invariant. `[VERIFIED]` Whether it ever measures distance is
+  `[UNKNOWN]`, not `[INFERRED]`. Frame rate measured: 302 fps.
 - **EP 0x81 is the multiplexor, and the IMUs now read.** 256-byte records, 28-byte header,
   tag at +8 (`0x66` IMU1, `0x77` IMU0, `0x88` mics, `0x99` buttons), 16-byte IMU payload at
   +28: gyro valid/X/Y/Z then accel valid/X/Y/Z as `i16` LE. Both accelerometers show gravity
@@ -231,7 +233,9 @@ claim below was then re-verified against captures we already had. **New document
 4. Test whether the arm sequence can be halved: the driver issues **one** IN per OUT, our
    replay issues two and the second always fails.
 5. Decode EP 0x83 to RGB properly (resolve which chroma slot is U and which is V) and
-   decode EP 0x84 as a depth map. Display output is still unsolved.
+   decode EP 0x84 as a depth map. **Display output is not a USB problem** — the
+   operator reports the display is a generic HDMI display driven by the headset's own SoC
+   (01 §1.7), so there is no USB display path to reverse-engineer.
 
 Full detail and the experiment for each: `07-open-questions.md`.
 

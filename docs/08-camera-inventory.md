@@ -136,7 +136,10 @@ random-pair baseline (ratio 1.000) in every candidate geometry, and scanning eve
 from 16 to 1099 finds no width with better coherence than any other. `[VERIFIED]`
 
 So EP 0x84 is a 352×288 array of 12-bit values that is **not a spatially coherent image**.
-Depth/range remains `[INFERRED]`, and the mapping to metres remains `[UNKNOWN]`.
+This measurement survived a later attempt to overturn it — see 09 §9.6, where a 36×
+"coherence" figure turned out to be a uniform-random baseline artefact. Depth/range is now
+`[UNKNOWN]`, not `[INFERRED]`: the field is a fixed pattern (corr with the temporal mean
+0.986, corr with the mono cameras ≈ 0.0) and it does not respond to covering the optics.
 
 ---
 

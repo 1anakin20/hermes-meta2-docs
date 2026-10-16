@@ -172,10 +172,9 @@ URB as a whole frame. It is a fragment. `[WITHDRAWN]`
 
 ---
 
-## 9.6 EP 0x84 is coherent after all
+## 9.6 EP 0x84: the coherence claim was a bad baseline, and it collapses
 
-Re-running the coherence test with the driver's geometry and **signed** arithmetic
-(`np.diff` on `uint16` wraps, which is what produced 08's "no spatial coherence"):
+The earlier version of this section reported EP 0x84 as 36× more coherent than random:
 
 ```
 435 frames of 352 x 288 in re/stream_ep84.bin
@@ -185,9 +184,44 @@ mean |vertical   diff| 36.01   random baseline 1368.47   -> 38x coherent
 value histogram peaks tightly around 2017-2033
 ```
 
-`[VERIFIED]` EP 0x84 is a coherent 352 × 288 12-bit image. `[INFERRED]` it is a depth map:
-the values sit near mid-scale (2025) with almost no scene-dependent variation, which is
-what a ToF returns when it has no usable return, and it is unchanged by occlusion (08 §8.8).
+That comparison is invalid. The "random baseline" was drawn **uniformly over the whole
+12-bit range**, while the real payload lives in a ~140-level band. Two adjacent uniform
+samples differ by ~1366 by construction; two adjacent samples from a narrow band differ by
+tens no matter what they contain. The ratio measured the width of the histogram, not the
+structure of the image. `[WITHDRAWN]`
+
+Re-run on `re/cap_four_ep84.bin` (120 frames from one 32 s window) against a
+**permutation** baseline — the same pixels, shuffled, identical histogram:
+
+```
+valid fraction 0.9966   body range 1..4031   mean 2029.5   std 37.4
+raw |h-diff| 38.37   permuted 38.37   -> 1.0x
+raw |v-diff| 29.12   permuted 29.41   -> 1.0x
+```
+
+`[VERIFIED]` At pixel scale EP 0x84 has **no** spatial coherence beyond what its histogram
+alone predicts. "EP 0x84 is a coherent 12-bit image" is withdrawn.
+
+What survives is low-frequency, and it is fixed:
+
+```
+16x16 box mean:  std 37.4 -> 6.3   range 2001..2071
+corr(frame, temporal mean)                    0.986 for every frame tested
+corr(smoothed ToF, smoothed mono0, same index) -0.19 .. +0.15
+temporal-mean row profile  2032.9 -> 2027.8   (top to bottom)
+temporal-mean col profile  2030.3 .. 2037.0   (no monotone trend)
+```
+
+Frame-to-frame variation is noise; the persistent component is a fixed vertical gradient
+of about 5 counts; and it does not correlate with what the mono cameras see in the same
+window. Combined with occlusion invariance (08 §8.8, ±0.3% under every cover), the honest
+statement is: **EP 0x84 streams a 352 × 288 field that carries no scene information in
+this state.** `[VERIFIED]` no scene correlation, fixed pattern, occlusion-invariant.
+`[UNKNOWN]` whether ToF ranging is disabled, whether the illumination emitter is off, or
+whether this endpoint carries raw correlation data that the host is expected to convert.
+
+Frame rate, measured in the same window: **9,657 complete frames in 32 s = 302 fps** at
+202,752 B per frame. `[VERIFIED]`
 
 ---
 
@@ -298,7 +332,7 @@ it suggests the arm sequence can be halved. `[INFERRED]`, not yet tested.
 |---|---|
 | "EP 0x83 is monochrome" | **Withdrawn.** It is the RGB camera, YUV422. See 9.4. |
 | "No endpoint carries colour" | **Withdrawn.** 0x83 carries chroma on the wire. See 9.4. |
-| "EP 0x84 has no spatial coherence" | **Withdrawn.** Unsigned `np.diff` artefact. See 9.6. |
+| "EP 0x84 has no spatial coherence" | **Reinstated.** The withdrawal was itself an artefact — a uniform 12-bit random baseline against a narrow-band payload. See 9.6. |
 | "EP 0x82's A/B pair is 2,032 samples per acquisition" | **Corrected.** 4,096-byte URB fragments of 752 × 480 frames. See 9.5. |
 | "EP 0x81 is a 45-slot status table, all slots absent" | **Withdrawn.** It is the multiplexor: IMU0/IMU1/mics/buttons. See 9.7. |
 | "The 2 mono + 1 RGB + 1 ToF model" | **Confirmed** by `EndPointType` and by geometry. |
@@ -308,8 +342,9 @@ it suggests the arm sequence can be halved. `[INFERRED]`, not yet tested.
 
 * No resolution/rate enum exists in this decompile — the frame sizes are hardcoded in the
   constructors, and nothing states fps. Our measured ~25 complete frames/s on 0x83 stands.
-* No display path appears in these files. Reading the headset is understood; **writing to it
-  is still unsolved**.
+* No display path appears in these files, and none is needed: the operator reports the
+  display is a **generic display driven over HDMI** (01 §1.7). Reading the headset over USB
+  is understood; the display is simply not a USB problem.
 * No register-map code appears here. The `3D | op | addr | data` register protocol documented
   in 03/04 is *not* what these classes send — these classes send whole-command requests with
   short payloads. The two layers are separate and their relationship is `[UNKNOWN]`.

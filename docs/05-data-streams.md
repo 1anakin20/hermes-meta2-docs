@@ -343,7 +343,21 @@ A C reader and a Python reader reach the same number — 51.1 MB/s and 51.6 MB/s
 synchronous submit-one-transfer-at-a-time pattern is not the bottleneck, and neither is the
 bus: the descriptor reports `bcdUSB 3.00` and "Lowest fully-functional device speed is
 SuperSpeed (5 Gbps)" with four bulk IN endpoints at `wMaxPacketSize 0x0400` (1024 bytes,
-1x), so 51 MB/s is under 9% of the link. `[CAPTURED]` The limit is inside the headset.
+1x), so 51 MB/s is under 9% of the link. `[CAPTURED]` The limit is inside the headset —
+**per endpoint**, not global. Reading all four bulk IN endpoints at once from one process
+(`re/capture_one.py 81,82,83,84 30`) delivered, in 32 s:
+
+| endpoint | stream | bytes | rate | complete frames |
+|---|---|---|---|---|
+| 0x81 | multiplexor | 2.0 MB | 0.06 MB/s | — |
+| 0x82 | mono0 + mono1 | 1.68 GB | 52.6 MB/s | 1,157 + 1,157 (36 fps each) |
+| 0x83 | RGB | 1.80 GB | 56.4 MB/s | 969 (30 fps) |
+| 0x84 | ToF | 1.96 GB | 61.4 MB/s | 9,657 (302 fps) |
+| **total** | | **5.4 GB** | **163 MB/s** | **11,783** |
+
+EP 0x83 still ran at its full ~30 records/s while three other endpoints were reading, so
+the ~51 MB/s figure is a per-endpoint ceiling and the aggregate is roughly 3× that.
+`[CAPTURED]` `re/cap_four_ep8*.bin`, `re/capture_four.log`.
 
 Read size does matter, and smaller wins: `[VERIFIED]`
 
