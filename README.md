@@ -52,6 +52,13 @@ Where a section mixes confidence levels, each claim is marked individually.
 | [docs/EVIDENCE.md](docs/EVIDENCE.md) | How each claim was produced, the artifacts, and reproduction commands. |
 | [docs/appendix-capture-rig.md](docs/appendix-capture-rig.md) | The full capture rig: QEMU + Windows 10 1809 + SDK + USB passthrough, and how to reproduce the capture. |
 
+## Continuing this project
+
+**[docs/HANDOFF.md](docs/HANDOFF.md)** is the resume point for the next session:
+established facts that should not be re-derived, the one blocking problem with ranked
+next experiments, the environment traps that cost the most time, and the documentation
+rules this project runs on.
+
 ## Reading order
 
 If you want to use the device: 02 -> 03 -> 05 -> 06.
