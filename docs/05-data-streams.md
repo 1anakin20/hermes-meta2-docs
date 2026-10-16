@@ -44,6 +44,14 @@ documented in **8.1 and 8.2**, which is where the measurements live.
 
 ## 5.2 EP 0x81 — record stream
 
+> **Corrected 2026-10-16 (latest): EP 0x81 is the multiplexor, carrying IMU0, IMU1,
+> microphones and buttons** — `MultiplexorEndPoint` in the decompiled driver. Each 256-byte
+> record is a 28-byte header (tag at +8: `0x66` IMU1, `0x77` IMU0, `0x88` mics, `0x99`
+> buttons) followed by a 16-byte IMU payload at +28: gyro valid/X/Y/Z then accelerometer
+> valid/X/Y/Z, all `i16` LE. Both IMUs decode with gravity visible (|a| ≈ 16,360 and 17,043
+> counts at rest). The `0xDADDF00D` value called a per-slot "absent" sentinel below is the
+> trailer's `FixedSentinelLow`. See 09 §9.7. The 45-slot table reading is withdrawn.
+
 Fixed 256-byte records. Over a 7,545,344-byte capture: 29,462 records located by their
 tag, of which 29,447 were exactly 256 bytes apart. `[VERIFIED]`
 
@@ -117,6 +125,15 @@ artifacts rather than device behaviour. The need to resync on the tag is real ei
 way. `[UNCERTAIN]` which.
 
 ## 5.3 EP 0x83 — the camera stream
+
+> **Corrected 2026-10-16 (latest): EP 0x83 is the RGB camera, and its wire format is
+> YUV422.** The decompiled vendor driver names this endpoint `RGBCameraEndPoint` and builds
+> a `YUV422Image(1280, 720)` from it (09 §9.1, §9.2). Grouping the payload into 4-byte
+> phases separates luma (slots 1 and 3, std 48.6, mutually correlated 0.992) from chroma
+> (slots 0 and 2, mean 128.05/126.71, std 4.5) — see 09 §9.4. Everything below in this
+> section was measured by reading the payload as 16-bit samples, which puts chroma in the
+> low byte of every sample and the image in the high byte; the "single-channel" and
+> "low 11 bits are noise" readings were that artefact, not a property of the camera.
 
 Each trigger cycle yields one 65,536-byte block. Interpreted as little-endian u16:
 32,768 samples. `[VERIFIED]`

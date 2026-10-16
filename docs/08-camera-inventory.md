@@ -31,6 +31,14 @@ interleaved produced 222 MB on `0x82` and 142 MB on `0x83` in the same 12 s). Th
 does not appear to allocate a fixed share per endpoint. `[VERIFIED]` that rates vary;
 `[UNKNOWN]` what sets them.
 
+> **Corrected 2026-10-16 (latest):** the 4,096-byte "record" below is a **USB fragment**,
+> not an acquisition. EP 0x82 carries two 752 × 480 `GrayScale16` images, mono0 (tag
+> `0x44`) and mono1 (tag `0x55`), interleaved one 4,096-byte URB at a time; a full frame is
+> 721,920 B of samples plus 32-byte trailers, and a trailer delta of exactly 721,952
+> appears in the capture. See 09 §9.2 and §9.5. The "2,032 samples per acquisition" figure
+> is 4,064 fragment bytes, and the ~223-sample displacement in 8.2 is an artefact of
+> comparing fragments. `[VERIFIED]`
+
 ### The 4,096-byte record
 
 ```
@@ -132,14 +140,36 @@ Depth/range remains `[INFERRED]`, and the mapping to metres remains `[UNKNOWN]`.
 
 ---
 
-## 8.4 EP 0x81 is not a camera
+## 8.4 EP 0x81 is the multiplexor — the 23 "status fields" are IMU samples
+
+> **Corrected 2026-10-16 (latest).** The byte-position analysis below was right; what it was
+> attached to was wrong. Those varying positions are the IMU payload, not a status table.
 
 256-byte records, 57/s. Across 689 records only **23 of the 256 byte positions vary at
 all** (std > 1). The varying positions are 8, 10, 20–23, 30–31, 34–35, 38–43, 228–231,
 252; position 252 increments by 1 per record. `[VERIFIED]`
 
-A stream with 233 constant bytes per record is a status/metadata record, not sensor data.
-`[INFERRED]`
+Re-measured over 2,875 records of `re/probe_arm_strobe_ep81.bin` and 1,293 records of
+`re/stream_ep81.bin`, both give **24** varying positions:
+`8, 10, 20–23, 30–35, 38–43, 228–231, 252–253`. Mapped through the driver's multiplexor
+header (09 §9.3) they are:
+
+| positions | field |
+|---|---|
+| 8, 10 | the record tag, alternating `0x66` (IMU1) / `0x77` (IMU0) |
+| 20–23 | header field |
+| 30–35 | `GyroscopeX/Y/Z` (`i16` LE at header+30) |
+| 38–43 | `AccelerometerX/Y/Z` (`i16` LE at header+38) |
+| 228–231 | trailer `TimeStampLow` |
+| 252–253 | trailer `PacketInformationLow` — the packet counter |
+
+`GyroscopeValid` (header+28) and `AccelerometerValid` (header+36) are constant at 1, which
+is why those four byte positions look "constant". `[VERIFIED]` Decoded values and the
+gravity check are in 09 §9.7.
+
+The old reading — "233 constant bytes per record, therefore status/metadata, not sensor
+data" — is **withdrawn**. A record that carries 12 varying sample bytes and 244 framing,
+timestamp and counter bytes is a low-rate sensor record, not a status block. `[VERIFIED]`
 
 ---
 
@@ -203,23 +233,26 @@ way to settle it.
 
 ---
 
-## 8.6 Current inventory, stated honestly
+## 8.6 Current inventory — settled by the decompiled driver
 
-| Stream | Established | Not established |
-|---|---|---|
-| `0x83` | 1280×720 mono image, 8-bit image data in the high byte of each u16, ~25 complete frames/s alone, ceiling 27.7 fps; **light-sensitive, responds to a centre-only cover (−43%)** | whether it is one camera or two, and its exact lens position |
-| `0x82` | A/B record pairs, 2,032 coherent 10-bit samples each, 4,064 samples per acquisition, correlates with 0x83's scene; **light-sensitive (saturation 0.1995 → 0.0000 under cover), responds to left and right covers, not to a centre cover; not Bayer** | whether A and B are the two side cameras, two halves of one camera, or one camera plus something else |
-| `0x84` | 101,376 12-bit samples per frame; 352×288 matches register `0xa886`'s read-back exactly; **not light-sensitive — unchanged (±0.3%) by every cover** | that it is an image at all, and whether it is a rangefinder that was simply not enabled |
-| `0x81` | 256-byte status records, 233 constant bytes each; **not light-sensitive** | what the 23 varying fields mean |
+The decompiled vendor driver names every endpoint (09 §9.1). That closes the inventory
+question that occlusion was designed to answer, and it agrees with the occlusion results in
+8.8.
 
-The user's working model — **two monochrome cameras, one RGB camera, one Time-of-Flight
-camera** — is now partly confirmed and partly contradicted. The two side positions and the
-centre position are both occupied by light-sensitive monochrome streams, which matches the
-two-monochrome-plus-one-more-camera shape. What is **not** found anywhere is colour: no
-endpoint carries Bayer, channel-sequential, or colour-phase structure, and there is no
-fifth endpoint to hide it in. `[VERIFIED]` for the absence of colour in the current
-configuration; `[UNKNOWN]` for where the vendor SDK's colour frames come from. See 8.8
-and 8.9.
+| Stream | Named by the driver | Verified against our captures | Still open |
+|---|---|---|---|
+| `0x83` | `RGBCameraEndPoint` → `YUV422Image(1280, 720)` | 1,843,232 B frame spacing; luma/chroma phase separation; 11% of pixels with channel spread > 20, max 189; reacts to a centre-only cover (−43%) | which chroma slot is U and which is V; lens position |
+| `0x82` | `MonoCamerasEndPoint` → `GrayScale16Image(752, 480)` ×2, tags `0x44` mono0 / `0x55` mono1 | headers at exact 4,096 B spacing, tag histogram 1024/1023; trailer delta 721,952 = 752×480×2 + 32; assembled frames 27–52× more coherent than random; reacts to left and right covers, not centre | which of mono0/mono1 is the left camera |
+| `0x84` | `ToFCameraEndPoint` → `TimeOfFlight16Image(352, 288)` | 202,784 B frame spacing; 435 frames; coherent 36–38× vs random; values clustered 2017–2033; unchanged by every cover | whether it is ranging at all, and its unit mapping |
+| `0x81` | `MultiplexorEndPoint` → IMU0 / IMU1 / microphones / buttons | 2,876 records at exact 256 B spacing, tags `0x66`/`0x77`; 16-byte IMU payload decodes with gravity visible in both accelerometers | mics and buttons have never appeared (see 9.8: the multiplexor mask omits bit 2); 212 unexplained bytes per record |
+
+The operator's working model — **two monochrome cameras, one RGB camera, one Time-of-Flight
+camera** — is **confirmed exactly**, by the driver's own `EndPointType` enum and by every
+frame geometry matching a boundary we had already measured. `[VERIFIED]`
+
+The earlier sentence "no endpoint carries colour" is **withdrawn**: 0x83 carries YUV422
+chroma on the wire, and the tests that appeared to refute colour were reading YUV422 as
+16-bit grayscale. See 09 §9.4 and EVIDENCE §6.
 
 What static analysis cannot settle: every camera in the headset looks at the same room, so
 scene correlation cannot separate them. Occlusion can, and it did — see 8.8.
@@ -344,7 +377,19 @@ vendor sent was accepted. `[VERIFIED]` All 138 errors are `[Errno 32] Pipe error
 
 ---
 
-## 8.9 Next: where do the SDK's colour frames come from?
+## 8.9 Resolved: the SDK's colour frames come from EP 0x83
+
+The decompiled driver answers this directly — `EndPointType.RGBCameraEndPoint = 131 = 0x83`,
+fed to a `YUV422Image(1280, 720)` (09 §9.1, §9.2). The SDK's 1280×720 colour frames are the
+same frames we have been capturing on 0x83 all along; we were rendering their luma plane.
+
+The usbmon experiment sketched below was run and its **method was invalidated** — a control
+capture against our own known-streaming reader recorded 0 bytes for all 7,670 completions —
+so it is recorded here only as a method that does not work on this host (EVIDENCE §5). It
+was not needed: the driver and a phase analysis of the payload settle the question.
+`[VERIFIED]`
+
+<details><summary>the experiment as originally sketched</summary>
 
 The decisive experiment is to watch the vendor software produce colour and see which
 endpoint feeds it.
@@ -359,4 +404,6 @@ endpoint feeds it.
 If colour arrives on an endpoint already known to be monochrome, the colour is being
 produced downstream of the wire — by the FPGA or by the SDK — and that changes what a
 Linux driver has to do.
+
+</details>
 

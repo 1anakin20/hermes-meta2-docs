@@ -179,8 +179,59 @@ clean result. Full table in `08-camera-inventory.md` §8.8.
 - **The 138 "failed" arm transfers are all IN transfers** — the second IN of a pair. No OUT
   ever fails, so no enable command is being lost.
 
-Next: run the vendor SDK in the VM under a host `usbmon` trace and attribute **completed**
-bulk bytes per endpoint while it emits colour frames (08 §8.9).
+That section's "No endpoint carries colour" bullet and the usbmon next-step are both
+superseded by the section below. The occlusion numbers themselves stand.
+
+### 2026-10-16 (latest) — the decompiled vendor driver settles the camera question
+
+`meta_driver_decompiled.zip` (C#, `Meta.Driver.*`) names every endpoint. `EndPointType`:
+`MultiplexorEndPoint = 129`, `MonoCamerasEndPoint = 130`, `RGBCameraEndPoint = 131`,
+`ToFCameraEndPoint = 132` — i.e. `0x81`–`0x84`, exactly the four bulk IN endpoints. Every
+claim below was then re-verified against captures we already had. **New document:
+`09-driver-decompiled.md`.**
+
+- **EP 0x83 is the RGB camera, in YUV422, 1280 × 720.** The "EP 0x83 is monochrome"
+  conclusion was an artefact: read as 16-bit samples, every u16 in `UYVY` is
+  `chroma | luma<<8`, so the old bit-group test saw luma in the high byte and called the
+  chroma "noise". A 4-byte phase test separates them cleanly (luma std 48.6, mutual
+  correlation 0.992; chroma mean 128.05/126.71, std 4.5), and the decoded frames have 11%
+  of pixels with channel spread > 20, max 189. `[VERIFIED]`
+- **EP 0x82 is the two mono cameras**: `GrayScale16Image(752, 480)` ×2, mono0 tag `0x44`,
+  mono1 tag `0x55`, interleaved one 4,096-byte URB at a time. Assembled per the driver's
+  own scanner it gives 5.76 complete frames per 4.16 MB, trailer delta exactly 721,952,
+  coherence 27–52× better than random, 10-bit values (max 1023). `[VERIFIED]`
+- **EP 0x84 is the ToF camera, 352 × 288, and it *is* coherent** — the earlier "no spatial
+  coherence" was `np.diff` wrapping on `uint16`. 435 frames, 36–38× better than random,
+  values clustered 2017–2033. `[VERIFIED]` Coherence is not the same as ranging; whether it
+  measures distance is still `[INFERRED]`.
+- **EP 0x81 is the multiplexor, and the IMUs now read.** 256-byte records, 28-byte header,
+  tag at +8 (`0x66` IMU1, `0x77` IMU0, `0x88` mics, `0x99` buttons), 16-byte IMU payload at
+  +28: gyro valid/X/Y/Z then accel valid/X/Y/Z as `i16` LE. Both accelerometers show gravity
+  at rest (\|a\| ≈ 16,360 and 17,043). `[VERIFIED]` First IMU data read outside the SDK.
+- **The enable protocol is one 6-byte command.** `0xC0`/value 6 with `[0, 4, 0, 0, 0, mask]`
+  selects endpoints (Mono0 = 2, Mono1 = 4, ToF = 8, Multiplexor = 16, RGB = 32, STD = 64);
+  `0xC0`/value 9 with `[0, 0, 0, mux_mask]` selects muxed sensors (IMU0 = 1, IMU1 = 2,
+  Mics = 4, Buttons = 8). Our 4-command strobe *is* this pair: `00040000007E` and
+  `0000001B`. **Microphones are missing from our mask** (`0x1B` omits bit 2) — that is why
+  no `0x88` record has ever appeared. `[VERIFIED]`
+- **The occlusion results are unchanged and now explained**: 0x82 reacts to left and right
+  covers and not to the centre = the two side mono cameras; 0x83 reacts to the centre = the
+  centre RGB camera.
+- **`usbmon` pcap cannot be used on this host.** A control capture against our own reader,
+  known to move ~50 MB/s on EP 0x83, recorded 0 bytes for all 7,670 completions. Do not
+  repeat that experiment. `[VERIFIED]`
+
+**Next actions, in order:**
+
+1. Set the multiplexor mask to `0x1F` and look for `0x88` microphone records.
+2. Query firmware versions — `0xC0`/7 ARM, `0xC0`/5 + `[0,116]` FPGA build date,
+   `0xC1`/253 USB, `0xB9`/4 + `[4,2]` GEO. This fills the "firmware unknown" field in 07.
+3. Try the file protocol: `0xC2`/4 with `hwinfo.bin` then `0xC0`/2 with `[19, addr BE]` to
+   read the serial and `calibration.bin` straight off the device. `[NOT YET REPRODUCED]`
+4. Test whether the arm sequence can be halved: the driver issues **one** IN per OUT, our
+   replay issues two and the second always fails.
+5. Decode EP 0x83 to RGB properly (resolve which chroma slot is U and which is V) and
+   decode EP 0x84 as a depth map. Display output is still unsolved.
 
 Full detail and the experiment for each: `07-open-questions.md`.
 
