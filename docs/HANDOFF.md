@@ -361,3 +361,27 @@ These are the operator's standing requirements, not suggestions.
   method that does not work).
 - Safety: only `0xC2`/4 and `0xC0`/2 with read opcode 19 were sent. No write opcode, no
   SPI-flash path, no golden-image probe.
+
+## 4d. E4: the ToF streams, is calibrated, and carries no range data (2026-10-17)
+
+`docs/12-tof-investigation.md` is the authority. Headlines:
+
+- EP 0x84 is a **live noisy stream**, not a fixed pattern: 99.66 % of pixels change over
+  time, per-pixel temporal sigma ~13, values mid-scale around 2034-2040 in a 12-bit
+  container. What it lacks is scene structure, not variation.
+- **Row 0 is a sentinel row** (4095 in 335 of 352 columns). Payload is 352x288; the
+  calibrated depth image is 352x287. That resolves the long-standing 288-vs-287 mismatch.
+- **No USB command is missing.** The driver's whole ToF enable is feed-mask bit 8, and the
+  capture arm already replays the vendor's full 417-transfer sequence including all 46
+  FPGA register writes (the 0xa8xx ToF band). The config descriptor has no bulk OUT, so
+  EP0 is the only control path.
+- "Config before stream" ordering was tested and made no difference (e4a vs e4b, identical
+  statistics). Hypothesis rejected.
+- **The vendor SDK gets no depth either**: `meta_get_point_cloud` returns exactly
+  352x287 = 101,024 points, all coordinates 0.0000, while `streams=0xFFF` marks DEPTH and
+  IR active. So the missing range data is a device-state problem, not a meta2lib gap.
+- ToF stack is Intel Royale (`royale.2.3.1.dll`), with use cases (TwoPhase/FourPhase/
+  EightPhase/GrayScale/Calibration), `BridgeEnclustra`, and IR LED driver vocabulary
+  (`CX3_UVC_LED`, Infineon IRS16X5C eval kit) - the illumination is active, not ambient.
+- Operator saw no IR emission from the headset. Not yet sanity-checked against a known IR
+  source (TV remote) - do that before trusting the negative.
