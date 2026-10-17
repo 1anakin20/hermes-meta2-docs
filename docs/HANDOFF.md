@@ -385,3 +385,41 @@ These are the operator's standing requirements, not suggestions.
   (`CX3_UVC_LED`, Infineon IRS16X5C eval kit) - the illumination is active, not ambient.
 - Operator saw no IR emission from the headset. Not yet sanity-checked against a known IR
   source (TV remote) - do that before trusting the negative.
+- E4 is **paused by the operator**, not closed. The one experiment that could still change
+  the conclusion is running the vendor SDK live in the VM while the operator watches the
+  faceplate for IR emission; if the official stack lights the emitter, it sends something
+  the replayed sequence does not.
+
+## 4e. E3: EP 0x81 record format fully mapped; microphones do stream (2026-10-17)
+
+`docs/13-multiplexor-records.md` is the authority. Headlines:
+
+- Every EP 0x81 record is **exactly 256 bytes**: 28-byte header, 212-byte payload,
+  12-byte trailer sentinel, u32 packet counter. Header magic is
+  `00 00 00 00 ab ba ed fe` (171,186,237,254 - easy to mis-write as `ab be ed fe`, which
+  yields zero header hits and looks like a dead endpoint).
+- **Tag mapping corrected**: `IsIMU0Header` tests 119 and `IsIMU1Header` tests 102 -
+  the opposite of earlier notes. MICS = 136, BUTTONS = 153.
+- The "212 unmapped bytes" are a **slot table**, not hidden sensors. IMU records carry
+  16 bytes of IMU samples plus 45 slots of `[index, ff, ff, ff]`; MICS records carry
+  176 bytes of audio plus 5 empty slots.
+- **The earlier "microphones produce nothing" result was an artifact.** EP 0x81 read
+  alone flushes a fixed ~645-record backlog and then goes silent forever. It sustains
+  only when the other three endpoints are drained (627 records/s with all four readers).
+- Mic samples: 4-byte groups, low byte always `0x00`, 24-bit signed LE in bytes 1..3,
+  each group duplicated in identical pairs (22 unique samples per record).
+- Mic rate measured at **8,405 samples/s** from a 10 Hz gate (three agreeing methods),
+  cross-checked at 8,150/s from the record arrival rate.
+- **Unresolved and stated as such:** the played 1 kHz carrier appears at 240.6 Hz, a
+  factor 4.15 low, with essentially nothing at 1 kHz or 2 kHz. Not interleaving
+  (tested 1/2/3/4/6/11/22 phases). 240.6 = 4x60 Hz and 48.8 Hz is also present.
+- Mic occlusion test **inconclusive**: std moved 11 % across tone/cover/stop phases while
+  peak-to-peak dropped 7x. The physical mic location on the headset is unknown.
+  **Microphone work is deprioritised by the operator for the first SDK version.**
+- IMU left/right signature: both accelerometers read ~1 g at scale 16384 with **opposite
+  Y signs** (IMU0 +13,014, IMU1 -12,736). Not yet matched to the calibration file's
+  `accelerometer_left` / `accelerometer_right` blocks.
+- BUTTONS (153) has never appeared on the wire. `ButtonType` = Video 1, VolumeUp 2,
+  VolumeDown 4, Power 8; `ButtonState` = Release 0, ShortPress 1, LongPress 3. A press
+  experiment is the way to get them. Operator reports holding the left-arm light button
+  toggles the HDMI display with a "bloop".

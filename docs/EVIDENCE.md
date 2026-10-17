@@ -162,6 +162,19 @@ one response have been replaced with `ff` padding (record length and structure a
 unchanged; only the identifying bytes are removed). Nothing else in this repo is
 redacted. No credentials, hostnames, IP addresses or SSH endpoints appear anywhere.
 
+## 8b. Multiplexor claims withdrawn and reinstated (E3)
+
+- **Withdrawn:** "microphone enable produces no data." The negative result came from
+  reading EP 0x81 alone, which flushes a fixed ~645-record backlog and then stalls. With
+  all four endpoints drained, MICS records (tag 136) appear at ~370/s carrying 176 bytes
+  of audio each.
+- **Withdrawn:** "mux tags are 102 = IMU0 and 119 = IMU1." The vendor's `DataScanner`
+  tests 119 for IMU0 and 102 for IMU1.
+- **Reinstated as measured:** the 212-byte payload region is a slot table, 45 slots of
+  `[index, ff, ff, ff]` in IMU records, replaced by 176 bytes of audio in MICS records.
+- **Open, not resolved:** the microphone sample rate is measured at 8,405 samples/s, but a
+  played 1 kHz tone appears at 240.6 Hz in that stream. No explanation is offered.
+
 ## 9. What was not available
 
 A web search for the Meta 2's published hardware specifications returned **no results**
