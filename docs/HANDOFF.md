@@ -546,3 +546,47 @@ under-enumerates the Qt MinGW DLLs' exports, roughly 8,606 of 17,212 rows, which
 report Qt's own internal vtable imports as unresolved — objdump is authoritative here).
 **It has not been executed on Windows**: this host's Wine cannot initialise a prefix, and no
 Windows system was set up for it.
+
+## 4i. The Windows viewer crashed on Start; one definite bug found, one suspected (2026-10-17)
+
+Reported symptom: the shipped `meta2-viewer.exe` dies when **Start** is clicked.
+
+**Definite bug, and it was in the shipped artifact.** `src/main.cpp` baked the build
+machine's path into the binary as the default arm file:
+
+```c
+#define ARM_FILE META2LIB_DATA_DIR "/arm_full.txt"   /* /home/hermes/work/meta2lib/... */
+```
+
+That path does not exist on Windows, and the zip did not ship `arm_full.txt` at all, so the
+Windows build could never arm the device. Fixed in `meta2-demo-viewer` `a958e3f`: the default
+is now resolved relative to the executable (`data/arm_full.txt`, then `arm_full.txt`, and only
+then the compile-time path), and the zip ships `data/arm_full.txt` next to the exe.
+
+**Suspected contributor, not proven.** The status tick called `meta2_reader_pending()` before
+`meta2_reader_start()` had initialised the reader's mutex. A zero-initialised `pthread_mutex_t`
+is a valid mutex on glibc, where the old build ran, and is **not** valid on winpthreads, which
+is what the Windows build links. That is a plausible access violation exactly on the Start
+path, and it is Windows-only, which matches the report. Fixed with a `readers_live_` flag:
+dropped/pending counters are only read while readers are actually running.
+
+**Diagnostic scaffolding added, because the crash could not be reproduced here.** The viewer now
+writes a step log next to the executable (`meta2-viewer.log`: open, port reset, reopen, arm file
+and command count, liveness probe, readers started, threads running, then arm/warm/stall/re-arm),
+and on Windows an unhandled-exception filter writes `meta2-viewer.exe.crash.log` with the
+exception code, the faulting address, and the module that address belongs to. Verified in the
+shipped binary by disassembly: `main` loads `&crash_filter` and calls
+`SetUnhandledExceptionFilter`. Note GCC inlines short literals like `.crash.log` as immediates,
+so that string is not contiguous in the image — do not conclude from `strings` that it is
+missing.
+
+**Still unverified.** The fixed binary has not run on Windows. This host's Wine cannot initialise
+a prefix (`wine: could not load kernel32.dll, status c0000135`) even after adding the i386
+multiarch and installing `wine32:i386` + `wine`; the Windows VM's SSH refuses every credential
+available here, and no QGA socket exists. So the crash cause is inference, not observation, and
+the honest statement is: one real Windows-breaking bug is fixed, the crash is not confirmed fixed.
+
+**Device note:** the headset is currently attached to the Windows VM (`-device
+usb-host,vendorid=0x2cfa`), so it is absent from the host bus and the Linux viewer now fails
+`meta2_open` with `-2` (`LIBUSB_ERROR_NOENT`). That is the VM holding it, not a regression;
+release it with QMP `device_del` when the host needs it.
