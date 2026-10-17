@@ -336,3 +336,28 @@ These are the operator's standing requirements, not suggestions.
 - The Meta 2 reports `bcdDevice 0.00` — **the firmware version is unknown**. Any result in
   these docs is tied to an unidentified firmware build. Flag this when a result fails to
   reproduce.
+
+
+## 4c. Device-side files read successfully; mono naming resolved (2026-10-16)
+
+`docs/11-device-files.md` is the authority. Headlines:
+
+- The `0xC2`/4 + `0xC0`/2 file protocol works on the host with plain libusb.
+  `hwinfo.bin` at `0x00ff0000` (17 B, the unit serial), `calibration.bin` at
+  `0x00fe0000` (7,520 B, 62 chunks). `_maxRetries = 32` in the vendor source is a
+  **retry** cap, not a chunk cap — stopping at 32 chunks truncates the calibration.
+- Device `calibration.bin` and the host `META2D<unit-serial>.xml` are **byte-identical**
+  after CR normalisation (7,361 B); the host copy just duplicates the CR on each line.
+- The serial is **not** inside the calibration blob; it lives in `hwinfo.bin`. Read that
+  first to bind calibration to a unit.
+- **`EP 0x82` tag `0x44` = calibration `mono_left` = wearer's left camera; tag `0x55` =
+  `mono_right` = wearer's right.** Established by operator lens occlusion and confirmed
+  6/6 by RGB-bridge reprojection through the calibration poses (~20 px correct vs
+  ~390 px swapped). The file's index order (`mono_right`=1, `mono_left`=2) does **not**
+  match wire order — do not infer it.
+- Mono cameras are **Kannala-Brandt fisheye** (`kb4`); RGB and depth are radial
+  (`k1_k2_k3`). Feeding mono intrinsics to a pinhole model is wrong.
+- Raw-pair disparity correlation without rectification is a dead end (documented as a
+  method that does not work).
+- Safety: only `0xC2`/4 and `0xC0`/2 with read opcode 19 were sent. No write opcode, no
+  SPI-flash path, no golden-image probe.
