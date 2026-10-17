@@ -164,9 +164,47 @@ The ToF statistics are invariant to within noise across every action. Mono (`EP 
 dropped to 0 B/s during the last two phases of `e4d`, the known hysteretic mono state;
 that is unrelated to the ToF result.
 
+Run `e4i` — the valid one. A self-driving coach (`e4_coach.py` + `verify/coach.html`)
+put COVER / UNCOVER / HAND AT 10 CM / HAND AT 1 METRE on the operator's screen with a
+countdown, so actions were timestamped automatically. 138 s, **zero silent seconds, zero
+re-arms**, display on, all phases measured:
+
+| phase | ToF mean | sigma | invalid frac |
+|---|---|---|---|
+| GET READY | 2048.27 | 869 | 0.00370 |
+| COVER NOW (1) | 2048.61 | 881 | 0.00368 |
+| UNCOVER (1) | 2048.97 | 905 | 0.00368 |
+| COVER NOW (2) | 2048.46 | 885 | 0.00365 |
+| UNCOVER (2) | 2049.09 | 894 | 0.00372 |
+| COVER NOW (3) | 2049.94 | 932 | 0.00365 |
+| UNCOVER (3) | 2049.28 | 916 | 0.00373 |
+| HAND AT 10 CM (1) | 2048.77 | 890 | 0.00370 |
+| HAND AT 1 METRE | 2049.94 | 937 | 0.00365 |
+| HAND AT 10 CM (2) | 2048.78 | 900 | 0.00368 |
+| HANDS OFF | 2047.66 | 852 | 0.00368 |
+
+The spread across every phase is **2.3 counts out of 2048**. Covering the entire front
+face with both hands, and a hand at 10 cm versus 1 m, are indistinguishable.
+
+**Why the covering is known to be effective:** the earlier occlusion experiment
+(`occlusion2_stats.json`) measured `EP 0x83` mean falling 55 % and `EP 0x82` falling 59 %
+under cover-all, with `EP 0x84` moving 0.3 %. The same physical intervention moves the
+optical endpoints massively and the ToF not at all. That is the cleanest statement E4
+produces.
+
+Two harness failures worth recording so they are not repeated:
+- `e4g` first attempt delivered **0 bytes on every endpoint for 135 s** because the coach
+  script omitted the full vendor arm and only sent sustaining feeds, after a killed run had
+  left the device in its dead state. A capture script that does not send `ctrl_seq_full.json`
+  will silently produce nothing.
+- `e4g` second attempt collapsed to zero bytes at t=45 s mid-run. The untouched dry run
+  (`e4h`) held 138 s with zero silences, so the collapse is state-dependent, not inherent.
+  `e4_coach.py` now re-arms automatically after 5 s of total silence.
+
 Operator observations:
-- The headset's status button blinks **slow pink** with PSU + USB connected and HDMI
-  disconnected. A single press and a 3 s hold both leave the blink unchanged.
+- The headset's status button blinks **slow pink** with PSU + USB connected. A single press
+  and a 3 s hold both leave the blink unchanged, and it still blinks slowly with the HDMI
+  display connected and lit.
 - The operator's phone camera **is** IR-sensitive (verified against a TV remote), so the
   absence of visible IR from the headset is a meaningful negative result.
 
