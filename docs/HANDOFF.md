@@ -455,3 +455,51 @@ Build/test state: `cmake -S . -B build && cmake --build build && ctest --test-di
 `-UNDEBUG` because a `Release` build would otherwise compile every `assert` away.
 Fixtures are synthetic (`tools/make_mux_fixture.py`, `tools/make_mono_fixture.py`);
 no capture is committed.
+
+## 4g. Library additions for a live consumer, and the demo viewer (2026-10-17)
+
+`meta2lib` commit `7d03c41` added what a *continuously running* consumer needs, which
+the batch-capture examples never exercised:
+
+- **`meta2_reader_drain` / `meta2_reader_pending`** (`transport.h/.c`). Without a drain
+  API the reader thread appends until its buffer is full and then counts overflow in
+  `dropped`. For a batch capture that is fine; for a viewer it silently throws away the
+  entire stream.
+- **`meta2_rgb_decode_yuv422`** (`frame.h/.c`). EP 0x83 pixel unpacking with the packing
+  as a parameter (`UYVY`/`VYUY`/`YUYV`/`YVYU`), BT.601 full-range coefficients scaled by
+  2^16 (91881, 22553, 46828, 116163). Phase evidence supports UYVY/VYUY; **which chroma
+  slot is U and which is V is still unresolved** - every capture taken so far is
+  near-neutral, so the swap is unmeasurable.
+- **`meta2_mono_to_gray`** (`mono.h/.c`): fixed 10→8 bit map `out = in >> 2`, no
+  auto-gain, so display brightness does not hunt.
+- Tests now **5/5** (`frame`, `mux`, `mono`, `decode`, `drain`), warning-free.
+
+**`meta2-demo-viewer`** (`github.com/1anakin20/meta2-demo-viewer`, commit `b7b9a4b`) is a
+Qt 6 PoC that consumes the library: RGB + both mono cameras live, four scrolling IMU
+charts, status bar with rates and dropped-byte counters. Verified on the real headset,
+35 s at scale 0.5:
+
+| stream | result |
+|---|---|
+| RGB EP 0x83 | 29.3 fps at 1280x720, 41.8 MB/s sustained |
+| mono EP 0x82 | **60.6 fps per camera**, exact single-acquisition frames only |
+| IMU0 / IMU1 | ~120 Hz instantaneous, ~130 Hz averaged |
+| dropped bytes | **0 / 0 / 0** on all three endpoints |
+
+The 60.6 fps mono rate is higher than the 36–43 fps documented earlier. Both are real
+observations under different device states; neither is a device constant. `0xAA` appeared
+once in 35 s. **MICS count was 0** with the default mux mask `0x1b`, confirming that bit 4
+(the MICS bit) is what gates audio: `--mux-mask 31` (`0x1f`) is required to get mic records.
+
+**Operational recipe that actually works** (the obvious sequence gives three black panels
+and no error): port reset → close → reopen → start readers and drain them *before* arming →
+one pass of `arm_full.txt` (265 of 410 commands accepted; the rest are recorded IN
+transfers that stall on purpose) → 6 s warm strobing at enable `0x7e` → sustain at `0x66`
+with mux `0x1b`. A **stall watchdog** re-arms after 3 s with no bytes on any endpoint,
+because the device stops streaming at unpredictable times *including immediately after a
+successful arm*, and because replaying the arm sequence can itself stop a device that was
+already streaming. Re-arm is bounded (5 attempts) rather than infinite.
+
+Next: settle U-vs-V with a saturated colour target; calibrate the accelerometer against a
+known static orientation and derive a gyro scale; deterministic mono framing (71–76 % exact
+yield is still not a clean frame boundary story); buttons on the wire.
