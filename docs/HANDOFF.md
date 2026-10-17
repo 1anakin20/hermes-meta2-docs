@@ -503,3 +503,46 @@ already streaming. Re-arm is bounded (5 attempts) rather than infinite.
 Next: settle U-vs-V with a saturated colour target; calibrate the accelerometer against a
 known static orientation and derive a gyro scale; deterministic mono framing (71–76 % exact
 yield is still not a clean frame boundary story); buttons on the wire.
+
+## 4h. Capture archive pruned, and a Windows cross-build (2026-10-17)
+
+**Disk reached 100 %** (54 MB free) and blocked further work. Pruned by rule, not by
+impression: a capture was deleted only if it was **referenced by no document and no analysis
+script** *and* larger than 50 MB.
+
+- Deleted: **38 bulk raw captures, 28.89 GB** (the multi-gigabyte EP 0x82/83/84 dumps from
+  the probe and E3 mic runs, whose analysis is already written up and whose small mux-side
+  counterparts were kept). Manifest: `metavision/re/PRUNED_MANIFEST.txt` (path, bytes, mtime).
+- Retained: **33 captures cited by meta2-docs or `re/` scripts (1.82 GB)** — including
+  `screen_66_ep82.bin`, `cap_cold_ep82.bin`, `e3mic_occl_ep81.bin`, `ep83_live.bin`,
+  `occl_baseline_ep83.bin` — plus 69 unreferenced captures under 50 MB (0.44 GB) as cheap
+  insurance. `vm/` (43.9 GB) and the Windows ISOs were left alone.
+- Filesystem went 100 % → 75 % used.
+
+**Evidence re-verified after the prune**, not assumed intact: 5/5 library tests pass, the mux
+dump on `e3mic_occl_ep81.bin` still reports 4,416 / 4,498 / 13,670 records with `0xAA` at
+counter 11908, and `screen_66_ep82.bin` still yields 435 exact frames per camera at 76.4 % /
+76.3 % framing quality.
+
+**New finding from the prune pass:** chroma was measured across all 16 EP 0x83 captures
+before any were deleted. Every one is near-neutral — per-phase chroma std between 2.3 and
+12.5, with no capture above 25. This independently confirms that **U versus V cannot be
+resolved from existing captures**; it needs a saturated colour target captured for the purpose.
+
+**Windows cross-build works from Linux**, no Windows install: mingw-w64 + Qt 6.8.2
+win64_mingw fetched with `aqtinstall` + libusb 1.0.28 cross-built from source. Two real
+fixes came out of it, both in the library/build rather than papered over:
+
+- `meta2lib` `ea4e8d3`: `#include <libusb-1.0/libusb.h>` only resolved on Linux because
+  `/usr/include` is a default search dir; `${includedir}` is now requested explicitly, and
+  the Windows-side link libraries a static libusb needs are named.
+- `meta2-demo-viewer` `91b9ed3`: Qt6 AUTOMOC insists on its own `Qt6::moc` target and ignores
+  `QT_MOC_EXECUTABLE`, so a cross build generates `moc_*.cpp` with a host moc and refuses to
+  configure unless the host moc version equals the linked Qt version exactly.
+
+`meta2-viewer.exe` is a valid PE32+ x86-64 image whose every import edge resolves against the
+shipped DLLs (checked by resolving import tables against export tables; note pefile
+under-enumerates the Qt MinGW DLLs' exports, roughly 8,606 of 17,212 rows, which makes it
+report Qt's own internal vtable imports as unresolved — objdump is authoritative here).
+**It has not been executed on Windows**: this host's Wine cannot initialise a prefix, and no
+Windows system was set up for it.
