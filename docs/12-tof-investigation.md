@@ -119,7 +119,39 @@ ToF processing stack. Strings of interest:
 A mid-scale value with noise and no scene dependence is consistent with a phase output
 whose modulation/illumination is not running. *Hypothesis*, not established.
 
-## 12.9 Open questions
+## 12.9 Physical-state experiments (all negative so far)
+
+`e4_watch.py` logs per-second byte rates for all four endpoints plus EP 0x84 mean, sigma
+and invalid-sample fraction, so operator actions correlate with timestamps. Mask `0x7e`,
+mux `0x1b`, all four readers.
+
+Run `e4c` (180 s):
+
+| phase | EP 0x84 | ToF mean | sigma | invalid frac |
+|---|---|---|---|---|
+| 0-45 s baseline | 223.9 MB | 2049.5 | 896 | 0.0038 |
+| 45-90 s single button press | 228.9 MB | 2049.3 | 888 | 0.0038 |
+| 90-135 s hand 10 cm / 1 m in front of centre | 204.7 MB | 2050.5 | 924 | 0.0038 |
+
+Run `e4d` (150 s):
+
+| phase | EP 0x84 | ToF mean | sigma | invalid frac |
+|---|---|---|---|---|
+| 0-40 s baseline | 191.6 MB | 2049.0 | 893 | 0.0037 |
+| 40-90 s button held 3 s | 246.4 MB | 2049.1 | 901 | 0.0037 |
+| 90-150 s HDMI attached | 297.5 MB | 2048.2 | 875 | 0.0037 |
+
+The ToF statistics are invariant to within noise across every action. Mono (`EP 0x82`)
+dropped to 0 B/s during the last two phases of `e4d`, the known hysteretic mono state;
+that is unrelated to the ToF result.
+
+Operator observations:
+- The headset's status button blinks **slow pink** with PSU + USB connected and HDMI
+  disconnected. A single press and a 3 s hold both leave the blink unchanged.
+- The operator's phone camera **is** IR-sensitive (verified against a TV remote), so the
+  absence of visible IR from the headset is a meaningful negative result.
+
+## 12.10 Open questions
 
 1. Is the operator's camera actually IR-sensitive? Control test: point it at a working TV
    remote and press a button; if the remote's LED appears as a bright dot, the camera
