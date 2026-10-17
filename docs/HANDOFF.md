@@ -423,3 +423,35 @@ These are the operator's standing requirements, not suggestions.
   VolumeDown 4, Power 8; `ButtonState` = Release 0, ShortPress 1, LongPress 3. A press
   experiment is the way to get them. Operator reports holding the left-arm light button
   toggles the HDMI display with a "bloop".
+
+## 4f. E9: the C library now decodes mux, IMU and mono (2026-10-17)
+
+`meta2lib` gained three things, all validated against real captures rather than only
+against synthetic fixtures:
+
+- **`include/meta2/mux.h` + `src/mux.c`** - EP 0x81 record finder, IMU decoder, MICS
+  audio decoder, and the `0xAA` record decoder. On `e3mic_occl_ep81.bin` the C parser
+  finds **22,585 records** with the same per-tag counts as the Python tool
+  (IMU0 4,416 / IMU1 4,498 / MICS 13,670) and identical IMU means.
+- **`include/meta2/mono.h` + `src/mono.c`** - a streaming exact-frame mono assembler
+  with bounded memory. On `screen_66_ep82.bin` it emits **435 frames per camera** and
+  on `cap_cold_ep82.bin` **405 frames per camera**, matching the Python renderer's
+  published numbers exactly (76.4 % and 71.2 % of trailer gaps are exactly one frame).
+- **Enable-mask / feed API** in `src/transport.c`: `meta2_feed_enable`,
+  `meta2_feed_disable`, `meta2_sustain_cycle`, plus endpoint and mux mask constants.
+
+Two new EP 0x81 findings came out of writing the parser, both documented in
+`docs/13-multiplexor-records.md`:
+
+- **A fifth record type, tag `0xAA` (170)**, present in 10 captures (25 records),
+  periodic every ~2,650 records, payload_len 0, header timestamp 0, tail tag 102.
+  Meaning unknown; the vendor's own `DataScanner` does not test this tag either.
+  See §13.10.
+- **The packet counter is not strictly +1.** In a healthy sustained capture: 22,573
+  steps of +1, 11 repeats, 0 skips, and every repeat involves a MICS record. See §13.11.
+
+Build/test state: `cmake -S . -B build && cmake --build build && ctest --test-dir build`
+→ **3/3 tests pass** (`frame`, `mux`, `mono`), warning-free. Tests are built with
+`-UNDEBUG` because a `Release` build would otherwise compile every `assert` away.
+Fixtures are synthetic (`tools/make_mux_fixture.py`, `tools/make_mono_fixture.py`);
+no capture is committed.

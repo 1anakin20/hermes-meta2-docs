@@ -145,3 +145,84 @@ presumably event-driven, so a press experiment is the way to see them. The opera
 has independently reported that holding the left-arm light button toggles the HDMI
 display off and on with an audible "bloop", which is consistent with a Power-type
 button existing and being handled by the headset's own SoC rather than by USB.
+
+## 13.10 A fifth record type: tag `0xAA` (170)
+
+This was found by *building* the C parser (E9), not by planning E3. Once a parser
+accepted only the four documented tags, one 256-byte block in an otherwise perfectly
+framed capture was silently skipped. Scanning every EP 0x81 capture on disk found it
+in ten of them:
+
+| capture | bytes | records | `0xAA` records | mean counter spacing |
+|---|---|---|---|---|
+| `ep81.bin` | 7,545,344 | 29,475 | 11 | 2,656 |
+| `conc_ep81.bin` | 1,802,752 | 7,042 | 3 | 2,648 |
+| `occl_uncover_ep81.bin` | 2,280,448 | 8,908 | 4 | 2,623 |
+| `e3mic_occl_ep81.bin` | 5,781,760 | 22,585 | 1 | – |
+| `occl_cover_left_ep81.bin` | 1,388,800 | 5,425 | 1 | – |
+| `occl_cover_right_ep81.bin` | 1,395,456 | 5,452 | 1 | – |
+| `probe3_ep81.bin` | 1,377,024 | 5,379 | 1 | – |
+| `probe7_ep81.bin` | 684,800 | 2,677 | 1 | – |
+| `e3mic_tone_ep81.bin` | 165,376 | 646 | 1 | – |
+| `e4b_ep81.bin` | 33,536 | 131 | 1 | – |
+
+25 records total, and every one has the same shape:
+
+| field | value |
+|---|---|
+| header tag at `+8` / `+10` | 170, repeated |
+| payload length at `+12` | **0** |
+| per-tag field at `+16` | 0 |
+| timestamp at `+20` | **0** |
+| trailer sentinel at `+240` | valid |
+| packet counter at `+252` | normal, in sequence |
+| payload `+0..11` | three u32: `a` in 35..40, `b` in 48..52, `c` in 407..519 |
+| payload `+12..195` | 46 slots `[index, ff, ff, ff]` |
+| tail `+196..199` | u32, varies widely (2 … 897) |
+| tail `+200..203` | u32 timestamp, non-zero |
+| tail `+208..211` | tag u16 repeated = **102**, not 170 |
+
+It is periodic, not random: consecutive `0xAA` records are 2,623–2,656 counters apart
+across four captures that contain several of them, and their tail timestamps are
+390–395 million clock units apart, which at the ~120.8 MHz clock in §13.7 is about
+3.2 s. The third payload u32 drifts upward by roughly 1 per record
+(452, 454, 455, 455, 456, 456, 457, 458 …).
+
+**What it is: unknown.** It is not in the vendor driver. `DataScanner` tests only
+119, 102, 136 and 153, so the vendor's own scanner does not recognise this record
+either; it would fall through the same way ours initially did. The tail tag being 102
+rather than 170 suggests it is emitted by whatever produces the IMU1 stream, but that
+is inference, not evidence.
+
+The practical consequence for a driver: **do not filter records by a known-tag
+whitelist and assume the rest is padding.** A skipped record shows up as a 512-byte
+gap between two otherwise 256-byte-apart records, which is exactly how this was
+noticed.
+
+## 13.11 Packet counter: +1 per record, but mic records share values
+
+The earlier statement that the counter "advances by exactly 1 per record" was measured
+on backlog-only captures, where it held 645/645. In a healthy sustained capture it is
+not that clean:
+
+| capture | steps | `+1` | repeated (`+0`) | skipped |
+|---|---|---|---|---|
+| `e3a_ep81.bin` (backlog) | 644 | 644 | 0 | 0 |
+| `e3mic_occl_ep81.bin` (healthy) | 22,584 | 22,573 | 11 | 0 |
+| `ep81.bin` | 29,470 | 29,157 | 311 | 2 |
+
+In the healthy capture, **every one of the 11 repeats involves a MICS record** — the
+tag pairs observed were `(136,102)`, `(136,119)` and `(136,136)`, and 6 of the 11 also
+share a header timestamp. That matches §13.7's finding that microphone records arrive
+in pairs. So the rule is: the counter advances by 1 per record, and a microphone
+record sometimes carries the same counter as its neighbour. Treat the counter as an
+ordering aid, not as a gap detector.
+
+## 13.12 Framing: do not assume 256-byte alignment from byte 0
+
+`ep81.bin` starts 240 bytes into a record — its first header is at offset 240, not 0,
+because the capture began partway through a URB. Records are then 256 bytes apart
+relative to that offset. A parser that indexes by `offset % 256` misreads the whole
+file. Header magic search with tag and trailer validation (as in `meta2_mux_find`) is
+the correct framing method; it also rejects the four stray magic hits that appear in
+that file at spacings of 16 and 252.
