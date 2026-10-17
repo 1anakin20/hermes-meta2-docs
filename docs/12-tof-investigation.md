@@ -90,7 +90,26 @@ all-zero point cloud. This matches EP 0x84 exactly: frames arrive, they carry no
 information.
 
 **Consequence:** the absence of range data in `meta2lib` is not a gap in our
-implementation. The vendor stack fails to obtain depth from this unit in this state too.
+implementation. The vendor stack's own depth output is empty in this state too.
+
+**Caveat on how strong that is.** `meta_core_api.dll` exposes 63 `meta_*` exports and has
+**no raw depth or ToF frame getter**. Depth reaches an application only through
+`meta_get_point_cloud` (a fused SLAM output) and `meta_get_eye_depth_stencil` (an AR
+occlusion buffer). So the all-zero point cloud proves the vendor pipeline produced no
+usable depth, but it does not by itself prove the raw ToF stream was empty under the SDK,
+because the point cloud also depends on tracking being initialised. In run `live3`,
+`pose.csv` shows `tracking_state,tracking_reason` = `0,0` for 196 polls and `1,3` for 576
+polls; the SDK's enum meaning is not documented in the shipped files, so `1,3` is not
+confirmed to mean "tracking initialised".
+
+The stronger argument is indirect but sound: the SDK consumes the same `EP 0x84` we read
+directly, and `EP 0x84` carries no scene information under the full vendor command
+sequence. Unless the SDK sends a command that changes what `EP 0x84` contains, the SDK
+cannot obtain depth either - which is what the zero point cloud is consistent with.
+
+`meta_start -> 0 (SUCCESS)` was confirmed in `probe.log` and `orch.log`, the SDK read the
+serial number, and `orch.log` ended with `rgb_frames=111 pclouds=23 polls=646`, so the SDK
+was genuinely running and streaming, not failing to start.
 
 ## 12.7 No IR illumination observed
 
