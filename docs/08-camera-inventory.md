@@ -410,3 +410,65 @@ Linux driver has to do.
 
 </details>
 
+
+
+## 8.10 Mono tag → physical side: settled by operator occlusion (2026-10-16)
+
+The live preview (`meta2lib/tools/` preview harness, served page) showed both EP 0x82
+sub-streams side by side, labelled only by USB tag, and the operator covered the lenses
+with an opaque hand.
+
+| Cover action | Panel that went black | Conclusion |
+|---|---|---|
+| Wearer's **left** lens | `EP 0x82 · tag 0x44` | **tag 0x44 = wearer's left mono camera** |
+| Wearer's **right** lens | `EP 0x82 · tag 0x55` | **tag 0x55 = wearer's right mono camera** |
+
+`[VERIFIED]` — direct observation, not inference. The driver agrees on the tag values:
+`DataScanner.IsMono0Header` tests `buffer[header+20] == 68` (`0x44`) and
+`IsMono1Header` tests `85` (`0x55`), so **Mono0 = 0x44 = wearer's left**, **Mono1 = 0x55 =
+wearer's right**. Consequences for the enable mask (`0xC0`/6, `[0,4,0,0,0,mask]`):
+
+- bit value `2` → Mono0 → the **wearer's left** mono camera
+- bit value `4` → Mono1 → the **wearer's right** mono camera
+
+`SensorType` in the driver names these `MonoCamera0 = 0x20` / `MonoCamera1 = 0x40`, and the
+driver layer contains **no** `left`/`right` strings at all — the `mono_left` / `mono_right`
+names exist only in the SDK calibration layer (`meta_block_sensors_db.dll`,
+`meta_calibration.dll`, and the graph ports `mono_left_IN` / `mono_right_IN` in
+`meta_core_api.dll`).
+
+**Still open:** whether the calibration file's `mono_left` block is the same physical camera
+as Mono0/`0x44`. A raw-pair disparity check was attempted and is **inconclusive**: per-row
+best horizontal shifts across 204 textured rows were 70 % positive (median +116 px) but 30 %
+strongly negative, and the lower half pinned at the search boundary (−147). That is expected
+and not evidence either way — the raw pair is unrectified (the calibration rotations are
+large and opposite, the cameras are canted outward) and the two preview frames are torn and
+not strictly simultaneous. Settling it needs a rectified stereo check using the calibration
+poses, or the device-side `calibration.bin` ordering from E1. `[UNKNOWN]`
+
+## 8.11 Mono dead-state recovery: the headset's own power supply, not USB
+
+On 2026-10-16, after a long series of enable-mask experiments and killed capture processes,
+EP 0x82 stopped delivering **any** bytes while EP 0x83 and EP 0x84 continued to stream
+normally (95.6 MB/s and 104.4 MB/s, 99.6 % / 99.1 % complete frames), and a freshly decoded
+RGB frame was confirmed to be a real optical image of the room — so the headset was powered
+and its sensors alive, with only the mono pair faulted.
+
+What did **not** work: `libusb_reset_device`, full re-arm, warm masks `0x7e` / `0x66` /
+`0x00`, and a bus-level port cycle (`echo 0` then `echo 1` to
+`/sys/bus/usb/devices/4-1/authorized`, which re-enumerated the device cleanly).
+
+What did work: **the operator unplugged and replugged the headset's PSU.** The next probe
+gave EP 0x82 `118,030,336 B` in 12 s (9.83 MB/s) with mono0 and mono1 trailers present, and
+the following live-preview run reached 58 MB/s on EP 0x82 with all four cameras producing
+frames. `[VERIFIED]`
+
+Two operational rules follow:
+
+1. Before blaming the device for a dead endpoint, check for a **zombie holder** of interface
+   0. A killed wrapper process can leave its Python child alive and holding the interface;
+   the signature is `set_configuration skipped: [Errno 16] Resource busy` plus `urbs=0
+   errors=1` on every endpoint. Several apparent "dead states" in this session were that.
+2. A mono fault that survives every USB-level reset is cleared by cycling the headset's own
+   power. `[UNKNOWN]` what inside the device latches; a Linux driver will need to document
+   this as a recovery action rather than a USB one.
