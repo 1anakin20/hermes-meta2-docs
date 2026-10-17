@@ -590,3 +590,18 @@ the honest statement is: one real Windows-breaking bug is fixed, the crash is no
 usb-host,vendorid=0x2cfa`), so it is absent from the host bus and the Linux viewer now fails
 `meta2_open` with `-2` (`LIBUSB_ERROR_NOENT`). That is the VM holding it, not a regression;
 release it with QMP `device_del` when the host needs it.
+
+**The Windows "crash" was not a crash.** The viewer quit itself 10 seconds after Start:
+`MainWindow::tick()` gated its snapshot-and-quit block on `snapshot_seconds_ > 0`, and
+`--seconds` defaults to 10, so a normal windowed run with no `--snapshot` still fired it —
+grabbing a window shot, failing to save it to an empty path, then `stop()` +
+`QApplication::quit()`. The log proved it by arithmetic: arm took 9.3 s and the stop landed
+0.7 s into the warm phase, 9.3 + 0.7 = 10.0 s, matching the default exactly. No
+`meta2-viewer.exe.crash.log` existed because no exception ever occurred, and the teardown
+logged `stop: complete`.
+
+Two consequences worth remembering for this device: the 6-second warm phase is what starts
+the cameras, so anything that cuts it short produces a device that arms perfectly
+(`OUT 131/131 accepted`) and still shows no camera data. And a control path that looks
+broken can be healthy: 139 strobe cycles attempted and 139 accepted in 0.7 s is ~200
+cycles/s, so the vendor control transfers on that host were never the problem.
