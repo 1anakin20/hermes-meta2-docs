@@ -54,10 +54,12 @@ Where a section mixes confidence levels, each claim is marked individually.
 
 ## Continuing this project
 
-**[docs/HANDOFF.md](docs/HANDOFF.md)** is the resume point for the next session:
-established facts that should not be re-derived, the one blocking problem with ranked
-next experiments, the environment traps that cost the most time, and the documentation
-rules this project runs on.
+This repository documents **how the device works**. It is not a lab notebook: run-by-run
+experiment narration and session handoff notes are kept outside it, so everything published
+here is meant to be read, checked and reused rather than followed chronologically.
+
+For the protocol stated as a specification, see the companion datasheet
+(`meta2-datasheet`). For working code, see `meta2lib`.
 
 ## Reading order
 

@@ -1,0 +1,21 @@
+# Captures and rendered camera frames must never be committed: they are pictures
+# of wherever the headset was pointing.
+*.bin
+*.raw
+*.ppm
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.avi
+*.ply
+out/
+vid/
+capture.log
+
+# Build output and scratch
+build*/
+__pycache__/
+
+# Internal agent handoff - not part of the published documentation
+HANDOFF.md
