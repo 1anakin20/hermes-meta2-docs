@@ -249,14 +249,18 @@ Claims established:
 - **`libusb_reset_device` resets the link, not the device.** It remains the correct reset for
   making command sequences reproducible and it does not produce silence. `[VERIFIED]`
 - **sysfs `authorized` toggling does not produce silence.** `[VERIFIED]`
-- **Physical USB removal does not produce silence**, because the headset runs on its own
-  battery. `[VERIFIED]`
+- **Physical USB removal does not produce silence.** `[VERIFIED]` The mechanism is not
+  established: no power source has been observed on this device, and "it kept state because
+  it has a battery" was an assumption imported from a different product, not a measurement.
+  Candidate explanations — internal battery, always-on rail, stored charge, FX3 firmware
+  state surviving a link disconnect — are all consistent with the data. `[UNKNOWN]`
 - **In the armed state a reader needs no control traffic at all.** `[VERIFIED]`
 
-Claims still open: whether the armed state can be exited at all without powering the headset
-off, and therefore whether our command set drives the IR emitter. Neither IR-8 nor IR-8b nor
-IR-9 answers that, and none of their light observations should be read as evidence either
-way. `[UNKNOWN]`
+Claims still open: whether the armed state can be exited at all by any means short of
+whatever power control this device actually has (its physical power controls have not been
+observed or documented), and therefore whether our command set drives the IR emitter.
+Neither IR-8 nor IR-8b nor IR-9 answers that, and none of their light observations should be
+read as evidence either way. `[UNKNOWN]`
 
 Artifacts, local to the working tree: `ir8_stats.json`, `ir8b.log`, `ir9.log`,
 `ir9_stats.json`, and the operator click logs `clicks_ir8.jsonl`, `clicks_ir8b.jsonl`,
@@ -269,3 +273,112 @@ Two implementation traps recorded the same day:
   `<u2`.
 - pyusb's `Device` has `reset()`, not `reset_device()`, and has no `close()`; dropping a
   handle is `usb.util.dispose_resources(dev)`.
+
+## 12. IR-11 to IR-17 — register 0xb007, and a throughput claim that will not hold (2026-10-21)
+
+### What the vendor SDK actually does at shutdown (IR-11) `[CAPTURED]`
+
+`usbmon4` capture, snaplen 1024, forced re-enumeration, a 20 s `MetaReader.exe` run, and the
+capture held open 20 s past the reader's exit. 134 vendor OUTs. The last two, 0.80 s and
+0.75 s before the reader process exited:
+
+```
+wValue=0x0006 wIndex=6 wLength=6  payload 000400000000
+wValue=0x0009 wIndex=4 wLength=4  payload 00000000
+```
+
+Those are the deassert halves of the two assert/deassert pairs our minimal sustaining strobe
+loops. The SDK deasserts them and leaves them deasserted; we re-assert them every iteration.
+**Zero vendor OUTs occurred after the reader process exited** — the teardown is explicit and
+inside the process. One write, `3d40b0070040`, appears exactly once in the whole capture and
+is never repeated; steady state uses `3d40b0070180`.
+
+Static corroboration from the SDK binaries: `cyapi.dll` exports `CCyUSBDevice::PowerState()`
+and `CCyUSBDevice::Reset()`; `meta2_host_itf.dll` exports `System_RegisterPowerOff` on both
+`DriverManagerAdapter` and `EventHandlerAdapter`. `[CAPTURED]`
+
+### The lever is register 0xb007, but it is not a clean gate
+
+Sending captured teardown candidates collapsed all four endpoints to 0.00 MB/s (IR-12). After
+that collapse:
+
+| action | result |
+|---|---|
+| minimal 4-command strobe, 5 s | ep81/82/83/84 all 0.00 MB/s |
+| full 134-transfer vendor arm, 0 failures | all 0.00 MB/s |
+| full arm + strobe, then one `3d40b0070180`, then strobe | ep82 114.47, ep83 98.39, ep84 97.69 MB/s |
+
+`[CAPTURED]` A single write to 0xb007 restored data that neither the strobe nor the full arm
+sequence could restore on its own.
+
+Three follow-up attempts to show that the **value** written determines the state all failed
+to reproduce (IR-13, IR-14, IR-15). IR-13 alternated 0x0180 and 0x0040 and got 0.00, 62.9,
+62.9, 0.00, 0.00, 0.00 MB/s on EP 0x82 — which does not track the value. IR-14 wrote each
+value once with no other traffic and got 0.00 MB/s in all 18 windows. IR-15 ran a defined ON
+procedure and OFF procedure twice each and got OFF 0.01, ON 0.01, OFF 55.16, ON 0.01 MB/s.
+`[CAPTURED]`
+
+Those three runs share one methodological flaw that IR-9 and IR-12 do not: the bulk readers
+were torn down and rebuilt for every measurement window. The original streaming finding is
+that bulk URBs must already be pending while control traffic is in flight, so tearing readers
+down mid-stream is precisely the condition to avoid. IR-16 removed that variable: one reader
+set, opened once, never stopped; only the control traffic changed.
+
+IR-16, 15 s phases, 5 s windows, EP 0x82 / 0x83 / 0x84 MB/s `[CAPTURED]`:
+
+| phase | window 1 | window 2 | window 3 |
+|---|---|---|---|
+| strobe only | 0.00 / 0.00 / 0.00 | | |
+| strobe + `0xb007=0x0040` | 6.32 / 1.31 / 8.14 | 3.98 / 1.47 / 5.24 | 3.77 / 1.78 / 5.45 |
+| strobe only | 0.05 / 0.13 / 0.01 | 0.00 / 0.00 / 0.00 | 0.00 / 0.00 / 0.00 |
+| strobe + `0xb007=0x0180` | 4.19 / 2.52 / 5.66 | 4.40 / 1.47 / 6.08 | 4.61 / 1.68 / 6.71 |
+| strobe only | 0.14 / 0.18 / 0.20 | 0.00 / 0.00 / 0.00 | 0.00 / 0.00 / 0.00 |
+| no control at all | 0.00 / 0.00 / 0.00 | 0.00 / 0.00 / 0.00 | 0.00 / 0.00 / 0.00 |
+
+In that state, **a write to 0xb007 on every loop iteration was necessary for any bulk data at
+all**, and it produced data with either value. 4 of 4 no-0xb007 phases gave ~0; 2 of 2
+with-0xb007 phases gave data. `[CAPTURED]`
+
+### The throughput ceiling is not a device constant
+
+A later probe with the same continuous-reader method measured, in 5 s windows:
+
+```
+arm + strobe + 0xb007=0x0180 :  ep82  3.98 ->  9.23 -> 14.68   ep83 2.10 -> 3.53 -> 6.47
+arm + strobe (no 0xb007)      :  ep82 71.72 -> 135.06 -> 197.97 ep83 55.96 -> 111.12 -> 166.06
+strobe + 0xb007=0x0180        :  ep82 203.21 -> 208.04 -> 213.91 ep83 167.53 -> 169.42 -> 171.30
+```
+
+`[CAPTURED]` Rates climbed monotonically inside a run and exceeded 200 MB/s per endpoint.
+Minutes later, an otherwise identical capture measured 1.0–2.1 MB/s. **These numbers are not
+reproducible across runs.**
+
+Consequently the previously recorded "device-side ceiling of ~51 MB/s on EP 0x83", the derived
+"~27.7 complete frames/s ceiling", and the statement that concurrent transfers do not scale
+are **withdrawn as device constants**. They were measurements of one device state, not of the
+device. `[CORRECTED]` They remain valid as what was observed in those specific runs.
+
+The EP 0x83 full-frame model also did not hold in the low-rate capture taken afterwards: 12.6
+MB of EP 0x83 contained 6 record markers with gaps of 1,048,576 (×4) and 4,194,304 (×1), and
+**zero** gaps of the expected 1,843,232. `[CAPTURED]` The frame model established in 5.4 is
+therefore state-dependent, and which states produce it is `[UNKNOWN]`.
+
+### Device health
+
+After every experiment above, the headset was re-attached to the VM and run under the vendor
+SDK: `Done: rgb_frames=45 pclouds=10 polls=381`. The device is not damaged and the vendor
+stack still works. `[VERIFIED]`
+
+### What is not claimed
+
+- That the value written to 0xb007 selects a specific stream configuration. Not shown.
+- What state the device is in, or what moves it between states. Unknown.
+- Any throughput figure. The only honest statement is that the rate is state-dependent and
+  currently unpredictable, spanning 0 to >200 MB/s per endpoint.
+- Anything about the emitter. IR-8, IR-8b and IR-9 were invalidated and their light
+  observations are not evidence.
+
+Artifacts, local to the working tree: `ir11.pcap`, `ir11_ctrl.tsv`, `ir12_results.json`,
+`ir13_results.json`, `ir13_ep83_sample.bin`, `ir14_results.json`, `ir15_results.json`,
+`ir16_results.json`, `ir17_ep83.bin`, and the scripts `ir11_teardown.sh`, `ir12_disarm.py`,
+`ir13_b007.py`, `ir14_b007_timeline.py`, `ir15_onoff.py`, `ir16_continuous.py`.

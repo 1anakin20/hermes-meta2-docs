@@ -329,8 +329,16 @@ at all. `[VERIFIED]`
 
 ## 5.6 The ceiling is inside the device
 
+> **Corrected 2026-10-21.** Everything in 5.6 and 5.7 was measured in one device state.
+> Later runs with the same method measured the same endpoint at 71, 135, 198 and 214 MB/s in
+> one run and at 1.0–2.1 MB/s minutes later, and the record gaps in the low-rate capture were
+> 1,048,576 and 4,194,304 rather than 1,843,232. The ~51 MB/s figure, the "concurrent
+> transfers do not scale" result and the derived 27.7 fps complete-frame ceiling are **not
+> device constants** and must not be used as design targets. See EVIDENCE.md §12. The
+> observations below are kept because they are what those specific runs produced.
+
 Concurrent bulk transfers do not raise EP 0x83 throughput. Same device, same 4-command set,
-6 s, 65,536-byte reads, N reader threads on the same endpoint: `[VERIFIED]`
+6 s, 65,536-byte reads, N reader threads on the same endpoint: `[VERIFIED]` for that run
 
 | Concurrent bulk transfers on EP 0x83 | total MB/s |
 |---|---|
@@ -379,6 +387,12 @@ The device emits ~30 frame records per second and delivers ~51 MB/s. 30 × 1,843
 55,296,960 B/s, which is more than it delivers. `[VERIFIED]` arithmetic. The complete-frame
 ceiling is therefore about **27.7 fps**, and a client must compare each record's gap to the
 next record and discard truncated frames. `[INFERRED]` from verified byte counts.
+
+**This 27.7 fps figure is withdrawn as a ceiling.** It was arithmetic on one run's byte rate.
+Runs measured on 2026-10-21 exceeded 200 MB/s per endpoint, which would be ~108 complete
+frames/s if the same framing applied — and in the low-rate runs the framing itself did not
+apply. Treat the record-gap discipline (compare each gap, discard truncated frames) as the
+usable part, and the rate as state-dependent. `[CORRECTED]`
 
 Throttling the command loop does not trade rate for completeness — it reduces both: `[VERIFIED]`
 

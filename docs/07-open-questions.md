@@ -29,9 +29,11 @@ with **zero** control transfers:
 | `authorized=0` → `authorized=1` on the sysfs device (full logical unplug/replug) | 49.49 / 53.27 MB/s | 44.25 / 36.28 MB/s |
 | physical USB cable removed 4.21 s and reinserted | 52.31 / 55.58 / 57.01 MB/s | 55.59 / 43.69 / 41.43 MB/s |
 
-`[CAPTURED]` The cable removal is the important row: the headset runs on its own battery, so
-pulling USB does not power-cycle the FX3 or the sensor pipeline. The device re-enumerated and
-was streaming at full rate 10 ms after the handle reopened.
+`[CAPTURED]` The cable removal is the important row: the device re-enumerated and was
+streaming at full rate 10 ms after the handle reopened. **Why** it survived is not known —
+it could be an internal battery, an always-on rail, stored charge, or the FX3 simply keeping
+its firmware state across a link disconnect. Nothing in our measurements distinguishes these
+and no battery has been observed. `[UNKNOWN]`
 
 Consequences:
 
@@ -132,14 +134,15 @@ numbers predate the port reset and are not comparable with anything measured aft
    answer looks like "the armed state, and it survives everything short of a power-off", but
    the armed state itself has never been entered from a proven-off device.
 
-**Experiment that would settle the remainder:** a real cold boot — power the headset off,
-power it on, and only then attach it to the host and read with no control transfers. Port
+**Experiment that would settle the remainder:** reach a genuinely disarmed device. Port
 reset, handle close/reopen, sysfs `authorized` toggling and physical USB cable removal have
-all been tried and none of them produced silence (7.1). Until a cold boot is measured, the
-arm/no-arm comparison and the `0xb007` suppression test cannot be given a trustworthy
-baseline. The previously proposed active WinUSB shim logging `cyapi.dll` transfers during
-steady state is now lower value: the command set is known, and what remains is what the
-commands mean.
+all been tried and none produced silence (7.1). The next candidate is not a physical one: the
+SDK's own teardown. `cyapi.dll` exports `CCyUSBDevice::PowerState()` and
+`meta2_host_itf.dll` exports `System_RegisterPowerOff` on both `DriverManagerAdapter` and
+`EventHandlerAdapter`, which means the vendor stack has a device power path that is visible
+as USB traffic and can be captured rather than guessed at. Until a disarm is demonstrated,
+the arm/no-arm comparison and the `0xb007` suppression test cannot be given a trustworthy
+baseline.
 
 ## 7.2 What the registers mean
 
