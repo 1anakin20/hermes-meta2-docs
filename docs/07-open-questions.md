@@ -157,11 +157,17 @@ holding 12-bit values (2 samples in 101,376 exceed 4095); `0x0FFF` as an explici
 sentinel, all 339 occurrences inside the header in this capture; body mean 2,066.7.
 `[VERIFIED]` See 5.4.
 
-**Not known:** the row stride and image dimensions, and the mapping to distance.
-Autocorrelation gives only an 18% contrast (29.0 at lag 704 against a 35.4 random baseline),
-where the same test on EP 0x83 gives 95%. 704 is the leading candidate because 352 / 704 /
-1408 / 2112 form a harmonic family and 704 × 144 equals the payload sample count exactly.
-`[INFERRED]`
+**Not known:** the mapping from sample value to distance. The row-stride question itself is
+resolved elsewhere: `docs/08-camera-inventory.md` names `352 × 288` from a register read-back
+(`0xa886` → 351, 288 as 0-based maxima) and supersedes the autocorrelation guess.
+`[VERIFIED]` read-back.
+
+The autocorrelation route is now **actively unsupported**, not merely weak. Over 20 M samples
+in two independent 12 s captures, mean |difference| at lag 704 against a random-pair baseline
+gives contrast of −1.1 % and +3.5 %. The earlier 18 % figure (29.0 at lag 704 against a 35.4
+baseline) came from a 1 M-sample capture and does not reproduce. The 352 / 704 / 1408 / 2112
+"harmonic family" argument therefore has no statistical support behind it. `[VERIFIED]`
+See 12.11.
 
 **Withdrawn:** the earlier "`1312` present as an explicit header field" observation — it came
 from a URB-sized slice, not from a frame boundary. `[VERIFIED]`

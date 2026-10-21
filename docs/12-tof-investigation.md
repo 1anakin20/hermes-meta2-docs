@@ -1,8 +1,10 @@
 # 12. ToF / EP 0x84 investigation (E4)
 
 Status: **the ToF endpoint streams, is fully calibrated, and is not missing any command we
-could send — but it carries no range data, and neither does the vendor SDK.** The IR
-illumination is not active in the current device state.
+could send — but it carries no range data, and neither does the vendor SDK.** The IR emitter
+**is** active, and it is gated on the vendor SDK running (§12.7). The five commands the
+SDK's own arm adds over ours have now been captured verbatim and do not explain the missing
+range data (§12.11).
 
 Everything below is from direct measurement unless marked *hypothesis*.
 
@@ -80,7 +82,16 @@ Statistically identical. Hypothesis rejected.
 the headset attached. Its `meta_get_point_cloud` output, from run `live3`:
 
 - `element vertex 101024` — exactly `352 × 287`, the ToF resolution.
-- **every coordinate is `0.0000`** in all 29 captured point clouds.
+- in run `live3`: **every coordinate is `0.0000`** in all 29 captured point clouds.
+- in two later runs, parsed in Python after copying the `.ply` files out of the VM rather
+  than with an in-shell regex:
+  - `orch2`: 13 clouds × 101,024 = 1,313,312 points, **11 non-zero**, max magnitude 0.5813 m.
+  - `ir1_c1`: 55 clouds × 101,024 = 5,556,320 points, **103 non-zero** (0.00185 %), 29 of the
+    55 clouds contain any, magnitudes 0.36 – 0.67 m, largest 0.6735 m.
+
+  So "every coordinate is zero" was literally true only for `live3`. The defensible statement
+  is that the vendor point cloud is empty to within about 0.002 %, with a handful of points
+  at plausible distances. `[CAPTURED]`
 - `status.csv` reports `streams=4095` (`0xFFF`), i.e. the SDK marks
   `IMU0_ACC, IMU0_GYRO, IMU1_ACC, IMU1_GYRO, MONO0, MONO1, RGB, PCLOUD, DEPTH, IR, NOISE, CONF`
   all active.
@@ -111,11 +122,41 @@ cannot obtain depth either - which is what the zero point cloud is consistent wi
 serial number, and `orch.log` ended with `rgb_frames=111 pclouds=23 polls=646`, so the SDK
 was genuinely running and streaming, not failing to start.
 
-## 12.7 No IR illumination observed
+## 12.7 IR illumination: observed, and gated on the SDK running
 
-The operator pointed a camera at the headset, including during the config-first run, and
-saw **no light coming from the headset**. *Not yet sanity-checked:* it has not been
-confirmed that the operator's camera renders IR at all (see §12.9).
+An earlier version of this section stated that no IR illumination was observed. **That claim
+is withdrawn.** The operator's camera is IR-sensitive (control test against a TV remote,
+§12.9), so both the earlier negative and the new positive are meaningful.
+
+Experiment `IR-1`: a self-driving coach (`re/ir1_coach.py`, phases rendered on the operator's
+screen with a countdown and a wall clock) ran two full cycles of NO SDK → SDK RUNNING →
+SDK STOPPED. `MetaReader.exe` was the SDK. Phase timestamps are in the run log.
+
+| clock (UTC) | phase | SDK state | operator observation |
+|---|---|---|---|
+| 04:03:15 – 04:03:35 | NO SDK (cycle 1) | stopped | off |
+| 04:03:35 – 04:04:54 | SDK RUNNING (cycle 1) | `MetaReader.exe` | **on** |
+| 04:04:56 – 04:05:26 | SDK STOPPED (cycle 1) | stopped | off |
+| 04:05:26 – 04:05:46 | NO SDK (cycle 2) | stopped | off |
+| 04:05:47 – 04:07:33 | SDK RUNNING (cycle 2) | `MetaReader.exe` | **on** |
+| 04:07:33 – 04:08:03 | SDK STOPPED (cycle 2) | stopped | off |
+
+Four off-windows and two on-windows, every one matching its phase. `[CAPTURED]`: **the vendor
+SDK run drives the emitter; our host-side replay of the vendor command sequence does not.**
+Both SDK cycles genuinely streamed — `rgb_frames=272 pclouds=55 polls=1290` and
+`rgb_frames=233 pclouds=47 polls=1133` — so the light is not an artifact of a process that
+started and then did nothing.
+
+The light is a purple glow from the front faceplate on the wearer's right. `unit_calib.xml`
+places the `depth` camera optical centre at the rig origin (`x = 0.0000`), with `mono_left`
+at `x = -0.0689`, `rgb` at `x = -0.0270` and `mono_right` at `x = +0.0691`; left to right
+across the front face the order is mono_left, rgb, depth, mono_right. The described location
+matches the depth camera. `[INFERRED]`
+
+This retires the "the emitter is broken" hypothesis. It also sharpens §12.8 rather than
+confirming it: the emitter lights under the SDK, yet `EP 0x84` still carries no scene
+structure under the SDK's commands or ours, and the SDK's own point cloud is still empty
+(§12.6). Illumination alone is not what makes a Royale phase output meaningful.
 
 ## 12.8 ToF stack identity
 
@@ -210,13 +251,100 @@ Operator observations:
 
 ## 12.10 Open questions
 
-1. Is the operator's camera actually IR-sensitive? Control test: point it at a working TV
-   remote and press a button; if the remote's LED appears as a bright dot, the camera
-   renders IR and the negative result on the headset is meaningful.
+1. ~~Is the operator's camera actually IR-sensitive?~~ **Answered: yes.** Control test
+   against a working TV remote. The negatives in §12.9 and the positive in §12.7 both stand.
 2. What is the headset's own power state? The IR LED driver may be enabled by the
-   headset's SoC rather than by anything reachable over USB.
-3. Does the vendor SDK, run live with the device attached, cause the emitter to fire? If
-   it does not, the enable path is outside the USB command set.
+   headset's SoC rather than by anything reachable over USB. Still open.
+3. ~~Does the vendor SDK, run live with the device attached, cause the emitter to fire?~~
+   **Answered: yes**, 2/2 cycles (§12.7). The enable path is therefore *not* outside the
+   USB-observable world — but it is also not any command we had recorded, and it is not one
+   of the five commands the SDK adds over ours (§12.11).
 4. `Meta.OOBE.exe` ("Setup Headset") and `Diagnostics/Meta.SimpleDiagnostics.exe`
    ("Meta Diagnostic", contains `diagMeta2Calibration`) are untested vendor tools that may
-   put the headset into a fuller mode.
+   put the headset into a fuller mode. Experiment IR-3.
+5. New and currently the sharpest question: the SDK lights the emitter, and the five
+   commands its arm adds over ours change neither the register block they touch nor
+   `EP 0x84`. So what does the SDK do that is *not* a vendor control transfer? Candidates:
+   a bulk path that does not exist (the configuration descriptor has no bulk OUT), a
+   standard (non-vendor) request we dismissed as enumeration noise, a timing/ordering
+   requirement in the sequence, or something on the headset's own SoC.
+
+## 12.11 IR-4: the vendor driver's own control traffic, captured from a cold start
+
+Method. `tcpdump` on the host `usbmon` interface for the bus carrying the headset, snaplen
+1024 so control payloads are captured whole. Two events inside one capture: a forced
+re-enumeration of the passthrough device (QMP `device_del` then `device_add`) so the Windows
+vendor driver initialises from scratch, then a 20 s `MetaReader.exe` run. USB passthrough
+does not hide anything here: every URB the guest submits still goes through the host kernel,
+so `usbmon` sees the guest driver's transfers. 1108 control URBs, 554 SUBMITs, 6.3 MB.
+
+Extraction used `tshark -T fields` with `usb.bmRequestType`, `usb.setup.bRequest`,
+`usb.setup.wValue`, `usb.setup.wIndex`, `usb.setup.wLength`, `usb.data_fragment`. Note that
+tshark formats `wValue` as hex and `wIndex`/`wLength` as decimal in this dissector; mixing
+those up is what corrupted `arm_full.txt` (§12.12).
+
+**Finding 1 — the vendor driver sends no vendor commands during enumeration.** `[VERIFIED]`
+All 134 vendor OUTs (`bRequest 0xC0`) begin 19.7 s after capture start, i.e. after
+`MetaReader.exe` launched. Everything the driver does at enumeration is standard:
+`GET DESCRIPTOR` DEVICE / CONFIGURATION / BOS / STRING, `SET FEATURE`, `SET ISOCH DELAY`, and
+hub `GET_STATUS` with `PORT_RESET`, `C_PORT_RESET`, `C_PORT_CONNECTION`,
+`C_PORT_LINK_STATE`. The hypothesis that motivated IR-4 — that the emitter enable happens
+during first enumeration and our original mid-stream capture missed it — is **false**. There
+is no hidden init command.
+
+**Finding 2 — the SDK's arm differs from ours by exactly five commands.** `[VERIFIED]`
+129 shared, 5 driver-only, 9 arm-only, compared by payload content.
+
+| driver-only command | what it is |
+|---|---|
+| `3d 60 b800` + 916 data bytes | a **920-byte write** to register `0xb800`, `wValue=3`, `wIndex = wLength = 920` |
+| `3d 21 b800` + 256 × `0xFF` | wide read, paired vendor IN of 257 bytes |
+| `3d 21 b880` + 256 × `0xFF` | wide read, paired vendor IN of 257 bytes |
+| `3d 21 b900` + 256 × `0xFF` | wide read, paired vendor IN of 257 bytes |
+| `3d 21 b980` + 148 × `0xFF` | wide read, paired vendor IN of 149 bytes |
+
+The nine arm-only commands are mostly artifacts of the original capture: five have empty
+payloads (their data fragments were lost), two are `0000030020` at `wValue=1`, one is
+`wValue=253` with no payload, and one is the `hwinfob` write already proven droppable by
+leave-one-out.
+
+**Finding 3 — the 920-byte blob is not the lever.** `[CAPTURED]` With the headset held by our
+own libusb client, after a port reset:
+
+- Registers `0xb800`, `0xb880`, `0xb900`, `0xb980` are **not empty**: 233/256, 243/256,
+  232/256 and 134/148 bytes non-zero, status byte `0x00` on every read.
+- Writing the SDK's exact 920-byte blob changed **0 of 257, 0 of 257, 0 of 257 and 0 of 149**
+  readable bytes. The blob's own bytes do not match what the registers return, so this is not
+  the SDK writing back what it read.
+- `EP 0x84` is unchanged by it. Two 12 s captures, same harness, port reset first, sustaining
+  strobe in both:
+
+  | run | throughput | `0x0FFF` sentinels | mean sample | frame markers |
+  |---|---|---|---|---|
+  | strobe only | 33.3 MB/s | 0.32 % | 2043.5 | 377 |
+  | blob + strobe | 33.3 MB/s | 0.34 % | 2041.1 | 238 |
+
+  A first control run reported 0.2 MB/s; its reader thread died on a USB error. The figures
+  above are from the re-run with `reader errors=0` and `dropped` accounted for.
+
+**Finding 4 — the lag-704 stride candidate gets no support at scale.** `[VERIFIED]` In both
+captures above, mean |difference| at lag 704 against a random-pair baseline gives contrast
+of **−1.1 %** and **+3.5 %** over 20 M samples. The 25 % figure that made 704 the leading
+candidate came from a 1 M-sample capture and does not reproduce. `docs/08` already replaced
+the guess with a register read-back naming `352 × 288`; this is independent confirmation that
+the autocorrelation route was measuring noise.
+
+## 12.12 `arm_full.txt` has a corrupt `wIndex` column
+
+`[VERIFIED]` In the freshly captured sequence, **0 of 134** vendor OUTs have
+`wIndex != payload length`, which independently confirms the grammar recorded in
+`docs/04-control-protocol.md`: for vendor OUTs, `wIndex == wLength == payload length`.
+
+In `meta2lib/data/arm_full.txt`, **27 of 138** OUT lines have `wIndex != payload length`, and
+131 of 138 match `wIndex = int(str(true_value), 16)` — the original extractor applied base 16
+to tshark's *decimal*-formatted output, so a true `wIndex` of 20 was recorded as 32.
+
+Consequence for the library: `meta2_capture.c` reads the column with `%d` and transmits the
+inflated value. `wLength` is derived from the payload length, not from the file, which is why
+arming still works. The corrected sequence, captured live and self-consistent, is committed
+as `meta2lib/data/arm_driver.txt`.

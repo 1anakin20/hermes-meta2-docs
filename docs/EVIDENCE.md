@@ -181,3 +181,35 @@ A web search for the Meta 2's published hardware specifications returned **no re
 from the configured search backend while these documents were written. No external
 specification is cited anywhere in this repo. Every claim is device-derived. If you have
 the vendor's published specs, reconcile them against `01-device.md` section 1.6.
+
+## 10. IR / ToF enable experiments (IR-1, IR-4, IR-6, IR-7)
+
+Artifacts, all local to the working tree and not published because they contain raw camera
+data or host-specific paths:
+
+| artifact | what it is |
+|---|---|
+| `ir4.pcap` | 6,287,126 B `usbmon` capture, snaplen 1024, covering a forced re-enumeration plus a 20 s SDK run |
+| `ir4_ctrl.tsv` | 1108 control URBs extracted by `tshark -T fields` |
+| `ir4_driver_arm.txt` | 405 control transfers (134 OUT, 271 IN) rebuilt from that capture, in the library's arm-file format with decimal fields |
+| `ir6_b800.json` | register read-backs of `0xb800`, `0xb880`, `0xb900`, `0xb980` before and after the SDK's 920-byte blob write |
+| `ir7_ep84_min2.bin`, `ir7_ep84_blob.bin` | 12 s EP 0x84 captures, strobe only vs strobe plus blob |
+
+Claims withdrawn or corrected in this round:
+
+- **Withdrawn:** "no IR illumination observed from the headset" (§12.7). The emitter lights,
+  and it is gated on the vendor SDK running, 2/2 coached cycles.
+- **Withdrawn:** "every coordinate is `0.0000` in all 29 captured point clouds" as a general
+  statement. True for run `live3`; later runs contain 11 and 103 non-zero coordinates out of
+  1,313,312 and 5,556,320. §12.6.
+- **Withdrawn:** "the emitter enable may happen during first enumeration, before our capture
+  started." The vendor driver sends no vendor control transfers at all during enumeration.
+  §12.11.
+- **Corrected:** the `wIndex` column of `arm_full.txt` is corrupt in 27 of 138 OUT lines;
+  131 of 138 match a base-16 misparse of decimal-formatted tshark output. §12.12.
+- **Corrected:** the lag-704 stride candidate for EP 0x84 gets −1.1 % and +3.5 % contrast at
+  20 M samples. §12.11, and 7.5.
+
+A measurement trap worth not repeating: `tshark -T fields` formats `usb.setup.wValue` as hex
+but `usb.setup.wIndex` and `usb.setup.wLength` as decimal for this dissector. Parsing all of
+them with one base silently corrupts half the table.
