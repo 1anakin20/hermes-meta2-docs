@@ -353,10 +353,37 @@ strobe + 0xb007=0x0180        :  ep82 203.21 -> 208.04 -> 213.91 ep83 167.53 -> 
 Minutes later, an otherwise identical capture measured 1.0–2.1 MB/s. **These numbers are not
 reproducible across runs.**
 
+**IR-18 (same day) shows those high numbers are not credible as payload.** Three checks:
+
+1. **Not a read-size artifact.** 1 MiB reads, then 64 KiB reads, then 1 MiB again, all with
+   the same continuous readers and the same control traffic: 13.8, 15.9 and 12.2 MB/s
+   aggregate. The rate does not track our read size, so that explanation is dead. `[VERIFIED]`
+2. **The aggregate exceeds the physical link budget.** That run reported ep82 213.91,
+   ep83 171.30, ep84 199.86 MB/s simultaneously — 585 MB/s, i.e. 4.68 Gbps of payload through
+   one SuperSpeed port. USB 3 SuperSpeed is 5 Gbps raw with 8b/10b encoding, so 500 MB/s is
+   the payload ceiling **before any protocol overhead**. 585 MB/s is 17 % above an absolute
+   ceiling. It cannot all be payload. `[VERIFIED]` arithmetic against the link rate; the
+   5 Gbps / 8b/10b figure is general USB 3 specification, not derived from this device.
+3. **Bytes and frames are decoupled.** In the same 15 s windows the device's own EP 0x83
+   frame counters advanced 28428 → 28434, about 0.12 frames/s, while bytes flowed at
+   13–16 MB/s aggregate. 200 MB/s would be 108 frames/s. The record markers in those captures
+   had **zero** gaps of the expected 1,843,232 bytes. `[CAPTURED]`
+
+Conclusion: our byte counter measures bytes the device sent, not imagery. In states where the
+1,843,232 framing breaks, a byte counter will report whatever the device emits, including
+re-sent or filler data, and it can exceed what the link can physically carry. **Throughput on
+this device must be measured by counting complete frame records, not bytes.** The only rate
+ever corroborated end to end is the 20 s video run: 500 complete 1280×720 frames in 19.889 s
+= 25.1 fps = 46.3 MB/s of useful payload, verified by `ffprobe` and by rendered, playable
+frames. `[VERIFIED]`
+
 Consequently the previously recorded "device-side ceiling of ~51 MB/s on EP 0x83", the derived
 "~27.7 complete frames/s ceiling", and the statement that concurrent transfers do not scale
-are **withdrawn as device constants**. They were measurements of one device state, not of the
-device. `[CORRECTED]` They remain valid as what was observed in those specific runs.
+are **not established as device constants** — they were measurements of one device state. But
+IR-18 discredits the high numbers that replaced them, so the correct position is: **~46 MB/s
+of useful EP 0x83 payload at ~25 complete frames/s is the only corroborated rate**, it is
+consistent with the link budget, and whether it is a hard ceiling or merely what that state
+produced remains `[UNKNOWN]`.
 
 The EP 0x83 full-frame model also did not hold in the low-rate capture taken afterwards: 12.6
 MB of EP 0x83 contained 6 record markers with gaps of 1,048,576 (×4) and 4,194,304 (×1), and
