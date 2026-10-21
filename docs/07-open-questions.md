@@ -18,6 +18,32 @@ been armed by an earlier session. `[CAPTURED]` Control traffic is what starts an
 streaming; a device already left armed can free-run. Which state the device is in is
 `[UNKNOWN]`, and it is the same unknown as the hysteresis below.
 
+**2026-10-21: the armed state is stickier than believed, and no host-side or cable-level
+reset clears it.** Three resets were tested in one session, each followed by a bulk read
+with **zero** control transfers:
+
+| reset applied | EP 0x83 | EP 0x84 |
+|---|---|---|
+| none (device left armed) | 51.7 MB/s | 54.5 MB/s |
+| USB port reset + close/reopen | 53.48 MB/s | 36.44 MB/s |
+| `authorized=0` → `authorized=1` on the sysfs device (full logical unplug/replug) | 49.49 / 53.27 MB/s | 44.25 / 36.28 MB/s |
+| physical USB cable removed 4.21 s and reinserted | 52.31 / 55.58 / 57.01 MB/s | 55.59 / 43.69 / 41.43 MB/s |
+
+`[CAPTURED]` The cable removal is the important row: the headset runs on its own battery, so
+pulling USB does not power-cycle the FX3 or the sensor pipeline. The device re-enumerated and
+was streaming at full rate 10 ms after the handle reopened.
+
+Consequences:
+
+- `libusb_reset_device` resets the **link**, not the device's internal state. It is the right
+  reset for making command sequences reproducible (7.1b) and the wrong tool for reaching
+  quiescence. `[VERIFIED]`
+- A reader in the armed state needs **no control traffic at all**. In the same session,
+  strobe-on and strobe-off windows were indistinguishable (EP 0x83 54.74–56.60 MB/s with
+  15,500 control transfers accepted, versus 53.32–55.18 MB/s with none). `[CAPTURED]`
+- A trustworthy quiescent baseline is **not reachable** from the host. It needs the headset
+  powered off, which has not been done. `[UNKNOWN]`
+
 Concurrency shape: **one process, one thread per endpoint.** Two processes cannot both
 claim interface 0; the second bulk reader fails with `LIBUSB_ERROR_BUSY`. `[VERIFIED]`
 
@@ -102,13 +128,18 @@ numbers predate the port reset and are not comparable with anything measured aft
    baseline.
 3. What `0xb007` gates. The suppression observation (7.4 vs 100.1 frames) predates the port
    reset and has not been re-measured behind it.
-4. What state allows the device to free-run with zero control traffic.
+4. What state allows the device to free-run with zero control traffic. As of 2026-10-21 the
+   answer looks like "the armed state, and it survives everything short of a power-off", but
+   the armed state itself has never been entered from a proven-off device.
 
-**Experiment that would settle the remainder:** establish a quiescent baseline you can trust
-(port reset, then prove silence, and only then apply commands), then re-run the arm/no-arm
-comparison and the `0xb007` suppression test behind it. The previously proposed active
-WinUSB shim logging `cyapi.dll` transfers during steady state is now lower value: the
-command set is known, and what remains is what the commands mean.
+**Experiment that would settle the remainder:** a real cold boot — power the headset off,
+power it on, and only then attach it to the host and read with no control transfers. Port
+reset, handle close/reopen, sysfs `authorized` toggling and physical USB cable removal have
+all been tried and none of them produced silence (7.1). Until a cold boot is measured, the
+arm/no-arm comparison and the `0xb007` suppression test cannot be given a trustworthy
+baseline. The previously proposed active WinUSB shim logging `cyapi.dll` transfers during
+steady state is now lower value: the command set is known, and what remains is what the
+commands mean.
 
 ## 7.2 What the registers mean
 

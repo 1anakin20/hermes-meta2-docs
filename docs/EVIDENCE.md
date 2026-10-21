@@ -48,7 +48,7 @@ below assume that rig exists.
 dumpcap -i usbmon3 -i usbmon4 -a duration:45 -w /tmp/meta2_trace.pcapng
 
 # while that runs, run the vendor reader in the VM (foreground, blocking)
-ssh -p 2222 hermes@<vm> 'C:\MetaReader\MetaReader.exe C:\MetaReader\OUT 40'
+ssh -p <port> <user>@<vm> 'C:\MetaReader\MetaReader.exe C:\MetaReader\OUT 40'
 ```
 
 Then extract control transfers:
@@ -213,3 +213,59 @@ Claims withdrawn or corrected in this round:
 A measurement trap worth not repeating: `tshark -T fields` formats `usb.setup.wValue` as hex
 but `usb.setup.wIndex` and `usb.setup.wLength` as decimal for this dissector. Parsing all of
 them with one base silently corrupts half the table.
+
+## 11. IR-8 / IR-9 — the armed state survives every reset short of a power-off (2026-10-21)
+
+Two experiments were designed to ask whether our own command set drives the IR emitter, and
+both were invalidated before they could answer it by the same discovery: the device has no
+quiescent state reachable from the host.
+
+IR-8 alternated `NO COMMANDS` / `COMMANDS ON` with the bulk readers pending throughout. It
+produced `control transfers ok=45512 fail=0`, `EP 0x83 total = 13,363,052,544 B`,
+`EP 0x84 total = 11,552,161,792 B`, `errors = 0` — and the `NO COMMANDS` phases streamed at
+the same rate as the `COMMANDS ON` phases. The device had been left armed by the previous
+run. `[CAPTURED]`
+
+IR-8b added a USB port reset at the start of every phase so both conditions would be
+symmetric. A smoke test of the reset path showed the premise was already dead: post-reset
+with zero control transfers the device streamed EP 0x83 at 53.48 MB/s and EP 0x84 at
+36.44 MB/s. `[CAPTURED]`
+
+IR-9 used the one reset the host cannot fake — the operator physically removing and
+reinserting the USB cable. The script timestamped the disappearance and reappearance
+(`device GONE 05:32:00.611`, `device BACK 05:32:04.821`, gap 4.21 s) and opened the handle
+10 ms after the device returned.
+
+| phase | control transfers | EP 0x83 | EP 0x84 |
+|---|---|---|---|
+| COLD, 3 windows | none | 52.31, 55.58, 57.01 MB/s | 55.59, 43.69, 41.43 MB/s |
+| STROBE ON, 4 windows | 15,500 accepted, 0 failed | 54.74, 56.60, 56.57, 55.78 MB/s | 43.05, 41.63, 47.96, 57.83 MB/s |
+| STROBE OFF, 2 windows | none | 53.32, 55.18 MB/s | 56.60, 51.89 MB/s |
+
+`[CAPTURED]` EP 0x84 mean sample stayed within 2041.17–2043.64 across all nine windows.
+
+Claims established:
+
+- **`libusb_reset_device` resets the link, not the device.** It remains the correct reset for
+  making command sequences reproducible and it does not produce silence. `[VERIFIED]`
+- **sysfs `authorized` toggling does not produce silence.** `[VERIFIED]`
+- **Physical USB removal does not produce silence**, because the headset runs on its own
+  battery. `[VERIFIED]`
+- **In the armed state a reader needs no control traffic at all.** `[VERIFIED]`
+
+Claims still open: whether the armed state can be exited at all without powering the headset
+off, and therefore whether our command set drives the IR emitter. Neither IR-8 nor IR-8b nor
+IR-9 answers that, and none of their light observations should be read as evidence either
+way. `[UNKNOWN]`
+
+Artifacts, local to the working tree: `ir8_stats.json`, `ir8b.log`, `ir9.log`,
+`ir9_stats.json`, and the operator click logs `clicks_ir8.jsonl`, `clicks_ir8b.jsonl`,
+`clicks_ir9.jsonl` written by `verify/coach_server.py`.
+
+Two implementation traps recorded the same day:
+
+- numpy dtype strings are byte widths: `<u16` is a 16-**byte** integer and raises
+  `TypeError: data type '<u16' not understood`. A 16-bit little-endian sample stream is
+  `<u2`.
+- pyusb's `Device` has `reset()`, not `reset_device()`, and has no `close()`; dropping a
+  handle is `usb.util.dispose_resources(dev)`.
