@@ -409,3 +409,114 @@ Artifacts, local to the working tree: `ir11.pcap`, `ir11_ctrl.tsv`, `ir12_result
 `ir13_results.json`, `ir13_ep83_sample.bin`, `ir14_results.json`, `ir15_results.json`,
 `ir16_results.json`, `ir17_ep83.bin`, and the scripts `ir11_teardown.sh`, `ir12_disarm.py`,
 `ir13_b007.py`, `ir14_b007_timeline.py`, `ir15_onoff.py`, `ir16_continuous.py`.
+
+## 13. IR-21 to IR-23 — the Windows driver's identity, a second command family, and a capture route that does not exist
+
+**The Windows driver is stock Cypress, not Meta code.** `[VERIFIED]` read from the guest's
+device properties: service `CYUSB3`, INF `oem2.inf`, provider "Meta Company", driver version
+**1.1.1.19**, device class "AR Experience Devices", parent `USB\ROOT_HUB30\4&1760152&0&0`.
+`cyapi.dll` is the matching Cypress user-mode companion. This matters for the driver goal:
+the kernel side of the vendor stack is a generic FX3 driver, so nothing Meta-specific sits
+between the function driver and the wire.
+
+**The vendor interface DLL has an explicit LED and ToF configuration path.** `[VERIFIED]`
+from the export tables. `meta2_host_itf.dll` exports `ConfigureLed(...)`,
+`ConfigureTofCamera(...)`, `ConfigureRgbCamera(...)`, `ConfigureMonoCameras(...)`,
+`ConfigureRawImu(...)`, `ConfigureFusedImu(...)`, `ConfigureMic(...)`,
+`ConfigureThermometers(...)` and `ConfigureButton(...)` on both `DriverManagerAdapter` and
+`InitConfigAdapter` (namespace `sdc`), plus a `Data_RegisterNewFarDepthFrame` event.
+`meta2_host_impl.dll` exports `ConfigureLed@InitConfigImpl@sdc` taking a `LedConfig*`, and
+`SetExposure` / `GetExposure` on `SAQDriverManagerAdapterCls`. `royale.2.3.1.dll` carries
+`IlluminationConfig`, `UseCaseTwoPhase`, `UseCaseFourPhase`, `UseCaseEightPhase`,
+`ExposureGray`, `IntensityPhaseOrder` and `AutoExposureRefAmplitude_Float`. So the vendor
+stack names the illumination and ToF configuration objects directly. **No command has yet
+been attributed to `ConfigureLed` or `ConfigureTofCamera`.** `[UNKNOWN]`
+
+**`meta_core_api.dll` exposes no CPU-readable ToF buffer.** `[VERIFIED]` all 63 exports were
+listed. The only depth-related exports are `meta_get_eye_depth_stencil` and
+`meta_get_eye_depth_stencil_texture`, and the `DXCompositor` exports
+`GetDepthStencilViewForLeftEye` / `...RightEye` returning `ID3D11DepthStencilView*` — GPU
+resources, not host buffers. There is no `meta_*` getter for raw ToF frames.
+
+**SET_INTERFACE is never used.** `[VERIFIED]` zero transfers with `bRequest == 0x0B` in the
+full 40 s SDK capture (`ir11.pcap`, 1084 control transfers). The FX3 alternate-setting
+hypothesis for the emitter is therefore not the mechanism. The only non-vendor requests the
+vendor stack sends are `SET_CONFIGURATION` (`bRequest 9`) and `SET_FEATURE` (`bRequest 3`) at
+each attach, plus `bmRequestType 0x00 bRequest 0x30` with a 6-byte payload `550055000000`
+and `bmRequestType 0x00 bRequest 0x31 wValue 0x0028`, both at every attach and neither
+dissected by tshark; they occur before any vendor app runs, so they are not the emitter
+enable. Their meaning is `[UNKNOWN]`.
+
+**There is a second vendor command family that `MetaReader.exe` never sends.** `[CAPTURED]`
+IR-21 ran `Meta.SystemTray.exe` in the guest while host `usbmon4` recorded control transfers
+(`ir21_meta.systemtray.pcap`, `ir21_meta.systemtray_ctrl.tsv`). It sent 8 vendor OUTs, none
+of which appear in the 134-command `MetaReader.exe` arm, and they do **not** follow the
+`3D | op | addr16BE | data` grammar — the payload begins `13 00`:
+
+```
+wValue=0x0007 wIndex=1  wLength=0   (no data stage)
+wValue=0x0005 wIndex=2  wLength=2   00 74
+wValue=0x0002 wIndex=40 wLength=40  13 00 6d 00 00 ...
+wValue=0x0002 wIndex=40 wLength=40  13 00 6d 40 00 ...
+wValue=0x0002 wIndex=40 wLength=40  13 00 06 d2 00 ...
+wValue=0x0002 wIndex=32 wLength=32  13 00 ff 00 ...
+```
+
+**IR-22: that family is a teardown, not an enable.** `[CAPTURED]` `ir22_tray_led.py` kept one
+process with continuous readers on EP `0x82/0x83/0x84` open for the whole run and varied only
+the control traffic (the reader-churn trap from section 12 was avoided):
+
+| phase | ep82 | ep83 | ep84 |
+|---|---|---|---|
+| STROBE ONLY | 8.51 MB/s | 2.95 MB/s | 13.52 MB/s |
+| STROBE + TRAY CMDS | 0.04 MB/s | 0.65 MB/s | 3.02 MB/s |
+| STROBE ONLY (after) | 0.00 MB/s | 0.00 MB/s | 0.00 MB/s |
+
+`control transfers ok=13069 fail=0`. The `13 00` family collapses all three bulk endpoints
+and strobe alone does not restore them. It is a stop/disconnect path, consistent with what a
+system-tray app does to a device it is releasing. **It is not the IR emitter enable.**
+
+**Recovery from that collapsed state works with the vendor driver's own arm.** `[CAPTURED]`
+`ir23_capture_ep84.py` replayed `meta2lib/data/arm_driver.txt` verbatim (405 transfers,
+`ok=274 fail=131` — the failures are vendor IN transfers, which stall unless armed by a
+preceding OUT) followed by the 4-command strobe, and bulk data returned at 8.46 MB/s on
+EP `0x84` with 40 complete 202,784-byte frame records and consecutive counters
+(244310, 244311, 244312, 244314, 244315 …).
+
+**IR-23: EP `0x84` decoded at 352 × 288 still shows no scene.** `[CAPTURED]` frames located
+by the `baabedfe` record marker, payload 202,752 B = 352 × 288 uint16, rendered to PNG.
+Per frame: mean 2079–2118, standard deviation 1630–2124, `0x0FFF` sentinel fraction
+0.33–0.66 %. Frame 0 vs frame 1: mean |difference| 77.5, only 1.59 % of samples identical.
+Vision assessment of the rendered frame: unstructured per-pixel speckle, no edges, no objects,
+no depth gradient; the only organisation is **vertical column banding** (fixed-pattern) and a
+**distinct brighter top row**, which is consistent with the already-recorded finding that row 0
+is a special row. This is the third independent capture in which the ToF stream carries no
+scene structure.
+
+**A capture route we do not have.** Two facts that close off "record the wire while the vendor
+SDK streams":
+
+1. Host `usbmon` truncates bulk payloads. `[VERIFIED]` `ir11.pcap` contains 45,518 bulk
+   transfers; the largest captured payload in the whole file is 256 bytes, and it came only
+   from EP `0x81` (whose URBs are 256 bytes). Every `0x82/0x83/0x84` COMPLETE event was
+   dropped. Control transfers are captured in full; bulk payloads are not.
+2. USBPcap 1.5.4.0 does not capture live traffic in this QEMU/xHCI guest. `[VERIFIED]`
+   installed in the Windows 10 1809 guest: driver package published (`oem3.inf`), service
+   `USBPcap` created and set to boot-start, `UpperFilters = USBPcap` set on class
+   `{36fc9e60-c465-11cf-8056-444553540000}`, `\\.\USBPcap1` opens, and the driver reports
+   `Found standard HWID: USB\ROOT_HUB30&VID1B36&PID000D`. Capture during a 20 s
+   `MetaReader.exe` run produced a **24-byte pcap** (global header only). Capture across a
+   forced re-enumeration produced 400 bytes, all of them `--inject-descriptors` records at
+   timestamp 0.000000. No live URB was ever recorded.
+
+**Correction to a named target that does not exist.** `[CORRECTED]` `docs/12-tof-investigation.md`
+listed `Diagnostics/Meta.SimpleDiagnostics.exe` and `Meta.DisplayManager.exe` as things to run.
+Neither exists in the SDK. The actual contents of `Meta SDK2 Beta/Utilities` are
+`firmware-update.exe`, `Meta.FirmwareUpdate.exe`, `Meta.OOBE.exe`, `Meta.SystemTray.exe`,
+`WorkspaceHelper.exe`; `Apps` contains only `Eye Alignment`. The two firmware-update programs
+have not been run and are out of scope: they are the SPI-flash path.
+
+Artifacts, local to the working tree: `ir21_meta.systemtray.pcap`,
+`ir21_meta.systemtray_ctrl.tsv`, `ir22_results.json`, `ir23_ep84/ep84.bin`,
+`ir23_ep84/frame_00..07.ppm|.png`, and the scripts `ir21_apps.sh`, `ir22_tray_led.py`,
+`ir23_capture_ep84.py`.

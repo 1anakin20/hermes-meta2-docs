@@ -259,15 +259,28 @@ Operator observations:
    **Answered: yes**, 2/2 cycles (§12.7). The enable path is therefore *not* outside the
    USB-observable world — but it is also not any command we had recorded, and it is not one
    of the five commands the SDK adds over ours (§12.11).
-4. `Meta.OOBE.exe` ("Setup Headset") and `Diagnostics/Meta.SimpleDiagnostics.exe`
-   ("Meta Diagnostic", contains `diagMeta2Calibration`) are untested vendor tools that may
-   put the headset into a fuller mode. Experiment IR-3.
+4. ~~`Meta.OOBE.exe` and `Diagnostics/Meta.SimpleDiagnostics.exe` are untested vendor tools~~
+   **Corrected: `Meta.SimpleDiagnostics.exe` and `Meta.DisplayManager.exe` do not exist.**
+   `[VERIFIED]` `Meta SDK2 Beta/Utilities` contains `firmware-update.exe`,
+   `Meta.FirmwareUpdate.exe`, `Meta.OOBE.exe`, `Meta.SystemTray.exe`, `WorkspaceHelper.exe`;
+   `Apps` contains only `Eye Alignment`. `Meta.SystemTray.exe` has now been run and captured
+   (IR-21, IR-22): it sends a `13 00 …` command family that `MetaReader.exe` never sends, and
+   that family **tears the bulk streams down** rather than enabling anything. See
+   `EVIDENCE.md` §13. `Meta.OOBE.exe` and `Eye Alignment` remain untested. The two
+   firmware-update programs are out of scope (SPI-flash path).
 5. New and currently the sharpest question: the SDK lights the emitter, and the five
    commands its arm adds over ours change neither the register block they touch nor
-   `EP 0x84`. So what does the SDK do that is *not* a vendor control transfer? Candidates:
-   a bulk path that does not exist (the configuration descriptor has no bulk OUT), a
-   standard (non-vendor) request we dismissed as enumeration noise, a timing/ordering
-   requirement in the sequence, or something on the headset's own SoC.
+   `EP 0x84`. So what does the SDK do that is *not* a vendor control transfer? Narrowed by
+   IR-21/IR-22 `[VERIFIED]`: **SET_INTERFACE is never sent** (zero `bRequest 0x0B` in a full
+   SDK session), so the FX3 alternate-setting idea is out; the only non-vendor requests are
+   `SET_CONFIGURATION`, `SET_FEATURE` and two unexplained `bmRequestType 0x00 bRequest 0x30 /
+   0x31` transfers that occur at every attach before any app runs. Remaining candidates: a
+   timing/ordering requirement in the vendor sequence, a command issued by a vendor app other
+   than `MetaReader.exe`, or something on the headset's own SoC.
+6. `meta2_host_itf.dll` exports `ConfigureLed(...)` and `ConfigureTofCamera(...)` on its
+   driver-manager and init-config adapters, and `meta2_host_impl.dll` has a `LedConfig`
+   struct and `SetExposure`/`GetExposure`. `[VERIFIED]` export tables. **No wire command has
+   yet been attributed to any of them.** `[UNKNOWN]`
 
 ## 12.11 IR-4: the vendor driver's own control traffic, captured from a cold start
 
