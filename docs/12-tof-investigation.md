@@ -361,3 +361,47 @@ Consequence for the library: `meta2_capture.c` reads the column with `%d` and tr
 inflated value. `wLength` is derived from the payload length, not from the file, which is why
 arming still works. The corrected sequence, captured live and self-consistent, is committed
 as `meta2lib/data/arm_driver.txt`.
+
+## 12.13 The depth path has a host-side mode register: `0xb00e`
+
+This is the first control found that a host can use to change what EP `0x84` emits. Full
+measurements in `docs/EVIDENCE.md` §17.5.
+
+The vendor writes it once, inside the arm, as
+`OUT bRequest 0xC0 wValue 3 wIndex 24 wLength 24` with payload
+`3d 60 b00e` + `15 15 15 15 15 15 15 15 15 15 15 15 13 15 15 13 15 15 04 15`.
+`3d` is the frame tag, `60` is the write opcode, `b00e` is the register address.
+
+Substituting a uniform byte value into all 20 data positions, in place, changes EP `0x84`
+according to this rule — tested on 23 values with no exceptions:
+
+| condition on the byte | EP `0x84` |
+|---|---|
+| bit1 `0x02` set | every sample is the `0x0FFF` invalid sentinel |
+| bit1 clear, bit2 `0x04` set | 12-bit data, mean 2037, sd 142, ~570 distinct values |
+| bit1, bit2 clear, bit4 `0x10` set | endpoint emits nothing |
+| bit1, bit2, bit4 clear | near-zero output (`0x01`), or broken framing at 0.01 MB/s (`0x08`, `0x09`) |
+
+Two constraints a library must respect:
+
+1. **Position matters.** Writing `0xb00e` after the arm finishes collapses every bulk endpoint to
+   zero, even with the vendor's own opcode and bytes. It has to be written where the vendor writes
+   it, before the transfers that follow.
+2. **It must be written at all.** Dropping only this one write leaves EP `0x84` streaming at
+   normal rate with 100% invalid samples. Dropping the whole `0xa880`–`0xa893` + `0xb00e` band
+   silences the endpoint.
+
+`[UNKNOWN]` whether the 20 bytes are 20 independent settings or one 160-bit field. The vendor's
+own value mixes `0x15` (data-producing) with two `0x13` and one `0x04`, which is consistent with
+a per-frame schedule in which some frames are deliberately invalidated; that has not been tested.
+
+`[UNKNOWN]`, and it is the blocking question for the proof of concept: the data-producing modes
+all yield the *same* distribution — mean 2037, sd 142, quartiles 2007/2029/2052 — regardless of
+the value used. Nothing observed so far makes that band respond to anything. The test that would
+settle it is a scene change with every register held constant, which needs physical access to the
+headset.
+
+`0xB8`, previously recorded as lethal, is not: 1,056 probes left the device streaming normally
+(`docs/EVIDENCE.md` §17.1). It answers `00 00 idx hi lo` with a 33-byte window, carries `PMDTEC`,
+`PMDSCL` and a `22.09.2017` build stamp for index 0..7, and is a plausible route to the PMD module
+manifest — but its index-to-window mapping is not yet understood.

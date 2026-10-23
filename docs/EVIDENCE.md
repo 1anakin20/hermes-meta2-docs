@@ -660,7 +660,12 @@ Artifacts, local to the working tree: `ir29_ep8{1,2,3,4}.bin`, `ir29_tof_ep8{1,2
 `ir29_cold_probe.py`, `ir29_analyse_ep84.py`, `ir30_reset_vs_noreset.py`,
 `ir31_arm_variants.py`.
 
-## 16. IR-32 to IR-37 — the register map becomes readable, and the `0xB8` family kills the device (2026-10-23)
+## 16. IR-32 to IR-37 — the register map becomes readable (2026-10-23)
+
+> **Corrected in §17.** The heading of this section originally read "…and the `0xB8` family kills
+> the device". That claim is **withdrawn**. §17 shows the device streaming normally after 1,056
+> `0xB8` probes, and shows that the all-zero measurements which produced the claim were an artifact
+> of a broken reader guard, not a device state.
 
 ### IR-33 — the first time any vendor IN payload was read
 
@@ -744,11 +749,128 @@ those INs stalled, and nothing afterwards worked. `[INFERRED]` as the cause; `[V
 that the state exists and that no host-side procedure recovers it, which is the same
 finding as §14 and again required the operator to cycle the headset's power.
 
-**Trap for future experiments:** query-shaped probes on `0xB8` / `0xB0` / `0xB9` are not
-free. Treat them as state-changing, run them last, and check `0xC1`/`0xFD` plus one
-`3d21` register read before and after every batch.
+**Trap for future experiments (withdrawn — see §17):** query-shaped probes on `0xB8` / `0xB0` /
+`0xB9` were recorded as state-changing. That attribution does not survive §17's controlled runs.
+Checking `0xC1`/`0xFD` before and after a batch is still worth doing, but a zero-byte reading
+after such a batch must be confirmed with `capture_mask.py` before it is believed, because the
+reader guard described in §17 produces exactly that reading.
 
 Artifacts, local to the working tree: `ir32_results.json`, `ir33_dump/register_map.json`,
 `ir33_dump/full_transcripts.json`, `ir34_families.json`, `ir35_mapdiff.json`, and the
 scripts `ir32_device_files.py`, `ir33_register_dump.py`, `ir34_request_families.py`,
 `ir35_map_diff.py`, `ir37_state_probe.py`.
+
+## 17. IR-38 to IR-49 — `0xB8` is a readable manifest, and `0xb00e` is a mode register (2026-10-23)
+
+### 17.1 The `0xB8` family is not lethal
+
+`[VERIFIED]` IR-40 issued 1,056 `0xB8` OUT/IN probe pairs in one session. Afterwards
+`capture_mask.py` measured 9.67 MB/s on EP `0x83` and 8.09 MB/s on EP `0x84`, and a full arm
+accepted 134/134 transfers. IR-41 re-read `0xB8` index 0..7 forty-six times across a
+re-open and got byte-identical replies every time.
+
+The all-zero readings that produced §16's lethal-device claim came from the two host-side
+defects in §17.6, not from the device.
+
+### 17.2 What `0xB8` returns
+
+Request: `OUT bRequest 0xC0 wValue 3 wIndex 5 wLength 5`, payload `00 00 idx hi lo`.
+Reply: a 33-byte IN.
+
+`[VERIFIED]` index 0..7 return content; index 8..31 return `ff` × 33. The content carries the
+ASCII tokens `PMDTEC` and `PMDSCL`, a build stamp `22.09.2017-14:16:18`, and the identifiers
+`01J0.DN1W` and `0006-2512-0043-1707`.
+
+`[UNKNOWN]` the mapping from `(idx, hi, lo)` to the returned window is not a linear offset, and
+it showed history dependence within a sweep — the same query returned different windows
+depending on what had been queried before it. Not resolved.
+
+`[INFERRED]` a per-module manifest table, consistent with the `g_pmd_cad` symbol in the
+calibration file.
+
+### 17.3 Ablation: which arm writes the depth path needs
+
+IR-45 replayed the 138-transfer arm with groups removed and measured EP `0x84`.
+
+| removed | EP `0x84` |
+|---|---|
+| the ToF-band write set (`0xa880`–`0xa893`, `0xb00e`) | endpoint silent |
+| `0xb00e` only | streams, but 100% of samples are the `0x0FFF` invalid sentinel |
+| `0xa893` alone | no measurable change |
+| `0xa886` alone | no measurable change |
+
+`[VERIFIED]` the behaviour. `[UNKNOWN]` what any of those registers contain.
+
+### 17.4 The arm is order-sensitive
+
+`[VERIFIED]` Re-issuing the `0xb00e` write *after* the arm completed — same opcode `0x60`, same
+20 bytes the vendor itself writes — dropped every bulk endpoint to 0.00 MB/s, while
+`capture_mask.py` measured 9.67/8.09 MB/s minutes before and after. A candidate value therefore
+has to be substituted at the position the vendor uses, not appended.
+
+### 17.5 `0xb00e` is a mode register, and its response is a bit field
+
+Vendor command, `arm_full2.txt` line 95:
+`OUT bRequest 0xC0 wValue 3 wIndex 24 wLength 24`, payload
+`3d 60 b00e` + `15 15 15 15 15 15 15 15 15 15 15 15 13 15 15 13 15 15 04 15`.
+
+IR-47 and IR-48 substituted a uniform byte value into all 20 positions and measured EP `0x84`.
+Twenty-three values tested, no exceptions to the rule below.
+
+| condition on the byte value | EP `0x84` behaviour | values |
+|---|---|---|
+| bit1 `0x02` set | every sample is `0x0FFF` | `02 03 06 07 0a 0b 0e 0f 12 13 16 17` |
+| bit1 clear, bit2 `0x04` set | 12-bit mid-scale data | `04 05 0c 0d 14 15` |
+| bit1, bit2 clear, bit4 `0x10` set | endpoint silent | `10 11 18` |
+| bit1, bit2, bit4 clear | near-zero (`01`), or out-of-range garbage at 0.01 MB/s (`08 09`) | `01 08 09` |
+
+`[VERIFIED]` the mapping. `[INFERRED]` that bit1 forces invalid samples, bit2 enables the data
+path, and bit4 disables the endpoint unless bit2 is set. `[UNKNOWN]` what the register physically
+configures.
+
+Exact moments, IR-49, accumulated in a 4096-bin histogram:
+
+| value | mean | sd | distinct values | p1 / p25 / p50 / p75 / p99 |
+|---|---|---|---|---|
+| vendor | 2037.37 | 142.12 | 567 | 1952 / 2007 / 2029 / 2052 / 2113 |
+| `0x04` | 2037.42 | 143.51 | 564 | 1952 / 2007 / 2029 / 2052 / 2113 |
+| `0x14` | 2037.30 | 141.49 | 572 | 1952 / 2007 / 2029 / 2052 / 2113 |
+| `0x01` | 1.50 | 77.05 | 79 | 99.88% of samples are `0x0000` |
+
+The three data-producing settings are statistically indistinguishable, so `0xb00e` selects a
+**mode**, not a gain or a scale. The mid-scale band is tight — an inter-quartile range of 45
+counts — with a small population of outliers at `0x0000` and `0x0FFF` that inflate the sd well
+above what the quartiles imply.
+
+`[UNKNOWN]`, and this is the open question: whether that 2037 ± 142 band is a scene-dependent
+correlation value or a fixed unmodulated output. Distinguishing them needs the scene to change
+while everything else is held constant.
+
+### 17.6 Three host-side defects that produced false "device is dead" readings
+
+1. A reader loop that treated any exception as fatal. pyusb reports a bulk timeout as
+   `USBError(110, '[Errno 110] Timed out')` — `errno` is `110` and the text is `Timed out`, not
+   `timeout`. A guard matching the wrong string ends every reader on the first idle endpoint,
+   which makes a live device read as 0.00 MB/s on every endpoint.
+2. An unanswered register read. Each `3d21` read OUT arms one control IN. Issuing the read and
+   never collecting the reply leaves that IN pending and wedges the control channel: the
+   sustaining strobe still reports success while every bulk endpoint falls to 0.00 MB/s.
+3. Filtering an arm transcript by register address without excluding opcode `0x21` picks up the
+   *read* of that address — a 20-byte `0xFF` mask — and replays it as if it were the written
+   value.
+
+Any future experiment that reports a device as dead must first be checked against
+`capture_mask.py`, which is the shortest path to a trustworthy rate measurement.
+
+### 17.7 Correction to IR-48
+
+IR-48's `sd` column is wrong: it reported ~1010 for the mid-scale settings, which is impossible
+given its own band histogram. The correct figure is ~142, from IR-49's histogram-based moments.
+IR-48's mean, rate and sentinel columns are consistent with IR-49 and stand.
+
+Artifacts, local to the working tree: `ir38_mask_maps.json`, `ir40_b8_table.json`,
+`ir42_b8_sweep.json`, `ir43_b8_cursor.json`, `ir44_ep81_imu.json`, `ir45_ablation.json`,
+`ir47_b00e_inplace.json`, `ir48_b00e_full_sweep.json`, `ir49_moments.json`, and the scripts
+`ir38_mask_maps.py`, `ir39_b8_enum.py`, `ir40_b8_table.py`, `ir42_b8_sweep.py`,
+`ir43_b8_cursor.py`, `ir44_ep81_imu.py`, `ir45_ablation.py`, `ir46_b00e_sweep.py`,
+`ir47_b00e_inplace.py`, `ir48_b00e_full_sweep.py`, `ir49_moments.py`.
