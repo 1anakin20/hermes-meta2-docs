@@ -23,6 +23,17 @@ codes**:
 `bRequest = 0xC0`. That was an artefact of filtering captures on `bRequest == 0xC0`. Every arm
 sequence we had replayed therefore omitted 4 of the 138 vendor OUTs. `[CORRECTED]`
 
+**But those four must not be folded into an arm sequence.** `[VERIFIED]` IR-31 held the device,
+the readers and the sustaining strobe fixed and changed only how the arm was sent. The same 138
+OUTs with the same payloads produced **3.27 / 2.66 / 2.0 MB/s** on EPs `0x82` / `0x83` / `0x84`
+when the four were sent on their captured request codes (`0xB8`, `0xC1`, `0xC2`), and
+**57.7 / 56.1 / 60.5 MB/s** when every OUT was forced to `bRequest 0xC0`. Read against the
+driver's own request constants, `0xC1`/`wValue 253` is the firmware-version query (it answers
+`00 0106` = FX3 1.6) and `0xC2`/`wValue 4` with payload `6877696e666f2e62` is the device-file
+address lookup for `hwinfo.bin`. They are real traffic the vendor driver sends, and they are not
+part of arming. **The arming sequence is the 134 `bRequest 0xC0` register transfers.** See
+`EVIDENCE.md` §15.
+
 Direction is carried entirely by `bmRequestType`.
 
 | `bmRequestType` | Direction | Role |

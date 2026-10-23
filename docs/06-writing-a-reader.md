@@ -64,10 +64,14 @@ left to return. They are harmless. Handle them as "no more responses", not as fa
 
 ## 6.4 The four rules that actually matter
 
-**1. `bRequest` is `0xC0` for the register grammar, but it is not the only vendor request.**
-Direction comes from `bmRequestType`: `0x40` out, `0xC0` in. A live vendor-driver session uses
-134 OUTs on `0xC0` and 4 more on `0xB8`, `0xC1` and `0xC2`; a reader that filters on
-`bRequest == 0xC0` silently drops those four. See `03-control-protocol.md` §3.1. `[VERIFIED]`
+**1. `bRequest` is `0xC0` for the register grammar, and `0xC0` is also what you must send when
+   replaying an arm.** Direction comes from `bmRequestType`: `0x40` out, `0xC0` in. A live
+   vendor-driver session uses 134 OUTs on `0xC0` and 4 more on `0xB8`, `0xC1` and `0xC2`; a reader
+   that filters on `bRequest == 0xC0` silently drops those four. But replaying those four on their
+   captured request codes **breaks the arm** — 3.27 / 2.66 / 2.0 MB/s on EPs `0x82`/`0x83`/`0x84`
+   versus 57.7 / 56.1 / 60.5 MB/s for the same payloads forced onto `0xC0`. They are a
+   firmware-version query and a device-file lookup, not arming commands. Arm with the 134 `0xC0`
+   transfers. See `03-control-protocol.md` §3.1 and `EVIDENCE.md` §15. `[VERIFIED]`
 
 **2. On an OUT, `wIndex` equals the payload length.** Not zero, not an address. 138 of
 138 observed transfers. `[VERIFIED]`

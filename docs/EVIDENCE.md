@@ -582,3 +582,80 @@ Artifacts, local to the working tree: `ir21_meta.oobe.pcap`, `ir21_eyealignment.
 `ir28/results.json`, and the scripts `ir24_build_arm_wire.sh`, `ir24_diag.py`,
 `ir24_replay.py`, `ir25_handoff_ep84.py`, `ir26_build_full_arm.sh`,
 `ir26_full_arm_replay.py`, `ir27_handoff_midrun.py`, `ir28_tray_leave_one_out.py`.
+
+## 15. IR-29 to IR-31 — a power cycle restores streaming, and the four extra request codes turn out to be a trap
+
+**Cycling the headset's power (unplug / replug) is what recovers the off state of section 14.**
+`[CAPTURED]` After the operator unplugged and replugged the unit, the device re-enumerated with a
+new address (`Bus 004 Device 003`), the register reads returned to sane values (`0xC1/253` answered
+`00 0106` = FX3 1.6, `0xC0/5` answered with a value, `0xb007` no longer latched at `0x0040`), and
+`capture_mask.py 7e 1b 15` gave EP `0x82` 38.18 MB/s, EP `0x83` 58.28 MB/s with 471 complete
+1,843,232-byte frames (99.8% of gaps), EP `0x84` 63.44 MB/s with 4,692 complete 202,784-byte
+frames (100.0%). No host-side procedure had achieved that in section 14.
+
+**A port reset before the arm is not the cause of an arm failure.** `[VERIFIED]` IR-30 ran four
+phases alternating reset / no-reset with the same arm and the same reader setup:
+
+| phase | ep82 | ep83 | ep84 |
+|---|---|---|---|
+| no reset | 54.75 | 58.58 | 71.71 MB/s |
+| port reset | 64.14 | 46.84 | 11.35 MB/s |
+| no reset again | 67.23 | 59.02 | 63.99 MB/s |
+| port reset again | 105.3 | 101.7 | 71.96 MB/s |
+
+All four streamed. Rates vary by a factor of ~9 between phases, which is the hysteresis already
+recorded, not an arm failure.
+
+**Replaying the `0xB8` / `0xC1` / `0xC2` transfers with their true request codes breaks the arm.**
+`[VERIFIED]` IR-31 held the device, the readers and the sustaining strobe fixed and changed only
+how the arm was sent:
+
+| arm sent | ep82 | ep83 | ep84 |
+|---|---|---|---|
+| `ctrl_seq_full.json`, every OUT on `bRequest 0xC0` | 67.0 | 47.0 | 11.5 MB/s |
+| `arm_full2.txt`, OUTs on their captured `bRequest` (`0xB8`/`0xC1`/`0xC2`) | **3.27** | **2.66** | **2.0** |
+| `arm_full2.txt`, every OUT forced to `bRequest 0xC0` | 57.7 | 56.1 | 60.5 |
+
+The two `arm_full2.txt` rows contain the same 138 OUTs and the same payloads; only the request
+code differs. So the four transfers described in section 14 are **not part of the arming path**.
+Read against the driver's own request constants they are a version query (`0xC1`/`wValue 253`,
+which answers `00 0106`) and a device-file address lookup (`0xC2`/`wValue 4` with payload
+`6877696e666f2e62` = ASCII `hwinfob`, i.e. the truncated name `hwinfo.bin`). Issuing them during
+the arm puts the device in a degraded state. **The arming sequence is the 134 `bRequest 0xC0`
+register transfers.** `[VERIFIED]`
+
+**Consequence for `03-control-protocol.md` §3.1:** the four extra request codes are real traffic
+the vendor driver sends, but a reader must not fold them into its arm sequence.
+
+**EP `0x84` after recovery: stable, structured at the sensor level, still no scene.**
+`[CAPTURED]` `capture_mask.py 48 1b 15` (`48` = ToF | STD) produced 4,934 complete frames in 15 s
+= **328.9 frames/s**. Over 200 frames:
+
+| measurement | value |
+|---|---|
+| mean / std | 2037.0 / 212.6 |
+| samples in `[1920, 2176)` | **99.615 %** (12-bit mid-scale is 2047.5) |
+| median | 2030 |
+| `0x0FFF` sentinel fraction | 0.33 % overall; **94.60 % in row 0**, 0.00 % in rows 1+ |
+| row 0 mean vs rows 1+ mean | 4031.5 vs 2030.1 |
+| temporal per-pixel std | mean 3.47, median 2.95 |
+| frame 0 vs frame 199 | mean \|diff\| 3.87, 10.22 % identical |
+| corr(frame 0, temporal mean) | 0.991 |
+| spatial coherence, permutation / real | 1.37 horizontal, 1.45 vertical |
+
+The coherence ratio moved from 1.0x in the off state to 1.37 / 1.45 here, and the temporal noise
+fell from ~13 to 3.47 counts, so the field is now stable and weakly structured. It is still not
+scene data: the two orders of magnitude that separate it from the mono cameras (31x / 21x) are
+absent, and vision assessment of both a single frame and the 200-frame temporal mean is
+"speckle plus vertical column banding, no edges, no objects, no depth gradient". The column-mean
+spread is 166.5 and the banding runs top to bottom, which is a readout fixed pattern.
+
+**The value distribution is the sharpest statement available.** 99.615 % of all samples fall in a
+256-count band centred on 12-bit mid-scale. A ToF phase output that was demodulating returned
+light would spread across the range with depth. This is the quantitative form of the earlier
+inference that the modulation is not running. `[CAPTURED]` mechanism `[UNKNOWN]`.
+
+Artifacts, local to the working tree: `ir29_ep8{1,2,3,4}.bin`, `ir29_tof_ep8{1,2,3,4}.bin`,
+`ir29_analysis/`, `ir30_results.json`, `ir31_results.json`, and the scripts
+`ir29_cold_probe.py`, `ir29_analyse_ep84.py`, `ir30_reset_vs_noreset.py`,
+`ir31_arm_variants.py`.
