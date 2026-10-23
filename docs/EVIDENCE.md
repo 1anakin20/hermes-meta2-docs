@@ -520,3 +520,65 @@ Artifacts, local to the working tree: `ir21_meta.systemtray.pcap`,
 `ir21_meta.systemtray_ctrl.tsv`, `ir22_results.json`, `ir23_ep84/ep84.bin`,
 `ir23_ep84/frame_00..07.ppm|.png`, and the scripts `ir21_apps.sh`, `ir22_tray_led.py`,
 `ir23_capture_ep84.py`.
+
+## 14. IR-24 to IR-28 — the protocol has more than one request code, and the device went into a state nothing host-side recovers
+
+**The arm files were missing four transfers.** `[VERIFIED]` A census of every control transfer
+in `ir11.pcap`, without filtering on `bRequest`, gives 138 vendor OUTs: 134 on `0xC0`, 2 on
+`0xB8`, 1 on `0xC1`, 1 on `0xC2`. `ir26_build_full_arm.sh` regenerates the sequence with
+`bRequest` explicit into `meta2lib/data/arm_full2.txt`; the old files carried only the 134.
+Details of the three extra codes are in `03-control-protocol.md` §3.1.
+
+**The stored arm sequences also carried the wrong field on IN transfers.** `[VERIFIED]`
+`arm_driver.txt` writes `I <wValue> <wLength>`, and replayers fed that third number in as
+`wIndex`. On the wire every vendor IN has `wIndex = 1` and `wLength` in
+`{1, 3, 5, 9, 11, 13, 17, 19, 21, 38, 41, 149, 257}`. With the fields corrected
+(`ir24_diag.py`): **134 of 134 OUTs accepted, 140 of 274 INs succeed, 134 stall** with
+`Errno 32`. The stall count equals the OUT count, so each OUT arms one IN and the second IN of
+the documented pair is not armed.
+
+**`Meta.OOBE.exe` and `Eye Alignment.exe` send no vendor commands at all.** `[CAPTURED]`
+IR-21 run against each (`ir21_meta.oobe.pcap` 3,652 B, `ir21_eyealignment.pcap` 6,187 B,
+70 packets). `Eye Alignment.exe` was confirmed running (`tasklist` PID 4924, 44,920 K). Both
+pcaps contain only enumeration traffic — `GET_DESCRIPTOR`, `SET_FEATURE`, `SET_CONFIGURATION`
+and the `bRequest 0x30 / 0x31` pair. Combined with IR-21's `Meta.SystemTray.exe` result, every
+vendor application available in the SDK has now been captured and none issues an enable command
+that `MetaReader.exe` does not.
+
+**The device entered a device-wide off state that no host-side procedure recovers.**
+`[CAPTURED]` All of the following produced **0.00 MB/s on EP `0x82`, `0x83` and `0x84`**:
+
+| procedure | result |
+|---|---|
+| full 138-OUT arm from `arm_full2.txt` | `ok=280 fail=140`, 0 bytes |
+| 134-OUT `0xC0`-only arm | 0 bytes |
+| 4-command sustaining strobe, 60 s | 0 bytes |
+| positive control `3d40b0070180` | 0 bytes |
+| each of the six tray commands individually (IR-28) | 0 bytes in all six windows |
+| vendor SDK run in the guest, then handoff after it exits | 0 bytes |
+| vendor SDK run in the guest, `device_del` **mid-run** so no teardown is sent | 0 bytes |
+
+The vendor SDK sees the same condition: its own `status.csv` for that run reads
+`device=2, connection=2` with an empty streams field, `pose.csv` is all zeros, and the run
+wrote 17 point clouds and **no RGB frames** — against 68 RGB frames from a healthy run earlier
+the same day. Kernel-side the device is normal: `4-1 2cfa:00f3 config=1 authorized=1
+power=active`, no driver bound to interface `4-1:1.0`.
+
+**`0xb007` no longer holds the steady-state value and a write to it does not stick.**
+`[CAPTURED]` It reads `00 0040` — the teardown value that IR-11 saw exactly once at SDK exit —
+not the `0x0180` used in steady state. Writing `3d40b0070180` returns success, the register
+reads `07` one second later and `00 0040` five seconds later. `0xa886`, which read
+`00 0000 015f 0001 0120` (the 352 × 288 geometry) in earlier sessions, reads `07 07 07 07` and
+then `00 400000` on consecutive probes. Reads of `0x0006` (`00 07fd`) and `0x0009` (`00 080e`)
+still succeed, so the control path is alive while the register contents are not stable.
+
+**Consequence for the ToF goal.** No ToF frame has been captured since IR-23, and the reason is
+not the emitter question — it is that the device is not streaming anything to anyone, including
+the vendor SDK. The remaining known route back to a streaming state is a headset-side power
+cycle, which is a physical action.
+
+Artifacts, local to the working tree: `ir21_meta.oobe.pcap`, `ir21_eyealignment.pcap`,
+`ir24_ep84/`, `ir25_ep84/results.json`, `ir26_ep84/`, `ir27_ep84/results.json`,
+`ir28/results.json`, and the scripts `ir24_build_arm_wire.sh`, `ir24_diag.py`,
+`ir24_replay.py`, `ir25_handoff_ep84.py`, `ir26_build_full_arm.sh`,
+`ir26_full_arm_replay.py`, `ir27_handoff_midrun.py`, `ir28_tray_leave_one_out.py`.

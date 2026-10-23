@@ -8,8 +8,22 @@ below is what had to be reverse-engineered.
 
 ## 3.1 Transfer shape
 
-Every vendor transfer uses **`bRequest = 0xC0`**. Direction is carried entirely by
-`bmRequestType`.
+**Most** vendor transfers use **`bRequest = 0xC0`**, but not all. A full census of one live
+vendor-driver session (`arm_full2.txt`) found **138 vendor OUTs on four different request
+codes**:
+
+| `bRequest` | OUTs | INs | what it does |
+|---|---|---|---|
+| `0xC0` | 134 | 274 | the `3D \| op \| addr16BE \| data` register grammar below |
+| `0xB8` | 2 | 4 | OUT `wValue=1 wIndex=5 wLength=5 data=0000030020`; the paired IN asks for **33 bytes**. Not a `3D` payload. `[CAPTURED]` |
+| `0xC1` | 1 | 2 | OUT `wValue=0x00FD wIndex=0 wLength=0` (no data stage). Its IN returns a **zero-length response even with no preceding OUT** — the only vendor IN observed that does not stall cold. `[CAPTURED]` |
+| `0xC2` | 1 | 2 | OUT `wValue=4 wIndex=8 wLength=8 data=6877696e666f2e62` = ASCII `hwinfob`. `[CAPTURED]` |
+
+**Correction:** earlier revisions of this document stated that every vendor transfer uses
+`bRequest = 0xC0`. That was an artefact of filtering captures on `bRequest == 0xC0`. Every arm
+sequence we had replayed therefore omitted 4 of the 138 vendor OUTs. `[CORRECTED]`
+
+Direction is carried entirely by `bmRequestType`.
 
 | `bmRequestType` | Direction | Role |
 |---|---|---|

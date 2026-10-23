@@ -64,8 +64,10 @@ left to return. They are harmless. Handle them as "no more responses", not as fa
 
 ## 6.4 The four rules that actually matter
 
-**1. `bRequest` is always `0xC0`.** Direction comes from `bmRequestType`: `0x40` out,
-`0xC0` in. `[VERIFIED]`
+**1. `bRequest` is `0xC0` for the register grammar, but it is not the only vendor request.**
+Direction comes from `bmRequestType`: `0x40` out, `0xC0` in. A live vendor-driver session uses
+134 OUTs on `0xC0` and 4 more on `0xB8`, `0xC1` and `0xC2`; a reader that filters on
+`bRequest == 0xC0` silently drops those four. See `03-control-protocol.md` §3.1. `[VERIFIED]`
 
 **2. On an OUT, `wIndex` equals the payload length.** Not zero, not an address. 138 of
 138 observed transfers. `[VERIFIED]`
