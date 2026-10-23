@@ -659,3 +659,96 @@ Artifacts, local to the working tree: `ir29_ep8{1,2,3,4}.bin`, `ir29_tof_ep8{1,2
 `ir29_analysis/`, `ir30_results.json`, `ir31_results.json`, and the scripts
 `ir29_cold_probe.py`, `ir29_analyse_ep84.py`, `ir30_reset_vs_noreset.py`,
 `ir31_arm_variants.py`.
+
+## 16. IR-32 to IR-37 — the register map becomes readable, and the `0xB8` family kills the device (2026-10-23)
+
+### IR-33 — the first time any vendor IN payload was read
+
+Every earlier statement about register values rested on our own live probes, because the
+passive captures carry no control-IN data (§3.4). `re/ir33_register_dump.py` replayed the
+captured arm and kept the IN bytes. `[CAPTURED]`
+
+74 register-read OUTs in the captured arm, 52 distinct addresses, spanning `0x0204` to
+`0xc40f`. **All 74 answered.** Notable:
+
+| address | value bytes | read back |
+|---|---|---|
+| `0xa886` | 8 | `00 0000 015f 0001 0120` — the 352×288 geometry, confirmed by read-back |
+| `0xa882` | 8 | `00 0280 1057 …` |
+| `0xa893` | 18 | wide block |
+| `0xb00e` | 20 | wide block |
+| `0xb062` | 16 | the block the vendor writes a 22-byte value into |
+| `0xb800` `0xb880` `0xb900` `0xb980` | 256 + 256 + 256 + 148 | **920 bytes total** |
+| `0xbff8` | 16 | `00 0800 072b 0800 0800 0800 0800 0800 0a2a` |
+| `0xc2bc` | 40 | table of 4-byte entries, `0x08d3` recurring |
+| `0xc2c0` `0xc2c4` `0xc2c8` | 2 each | all `07f1`; `0xc2cc` = `07f1 03b7` |
+| `0xc352` | 12 | `00 6839 1b4f 03e8 8045 3d71 060a` |
+| `0xc35e` `0xc363` `0xc368` `0xc36d` | 10 each | `00 5529 5555 4e15 c71b 0000` |
+
+**The four `0xb8xx` blocks are exactly the 920-byte blob** the vendor driver writes at
+`0xb800` (IR-6). Read as 16-bit big-endian, **every one of the 458 values is below
+`0x1000`** — a 12-bit table, the same container width as the EP `0x84` samples. `[CAPTURED]`
+What the table contains is `[UNKNOWN]`; there is no ASCII in it.
+
+**Nine addresses changed value between two reads inside the same run**, so they are live
+rather than static configuration: `0x0204`, `0xa882`, `0xa892`, **`0xb007`** (`000040` vs
+`000180` — the bulk-data lever of §12), `0xb0ae`, `0xc036`, `0xc363`, `0xc401`, `0xc402`.
+`[CAPTURED]`
+
+The identity read (`0xC0`/`wValue 2`, opcode 19, address `0xff000000`) returned 38 bytes:
+six header bytes, then `META2D<unit-serial>`, then `0xFF` fill — the file-read framing of
+§11.1 reached directly. `[VERIFIED]`
+
+### IR-32 — a byte-order error, corrected
+
+`re/ir32_device_files.py` re-derived `GetFileAddress` from the IL and parsed the four
+address bytes **big-endian**. §11.1 has them **little-endian**, and §11.1 is right. The
+addresses IR-32 printed (`0xfe00`, `0xff00`) are byte-swapped versions of the real
+`0x00fe0000` / `0x00ff0000`, so the bodies it printed are **not** file contents.
+`[CORRECTED]` — §11 stands as written and is not superseded.
+
+What IR-32 does establish independently: `0xC0`/`wValue 2` opcode 19 is a **32-bit device
+memory read**, not a file-specific call. Reading `0xff000000` returned `4d 41 32` ("MA2")
+from inside the `hwinfo.bin` region, and reading arbitrary addresses works whether or not a
+name resolved to them. `[VERIFIED]`
+
+### IR-34 — `0xB9` is a live second command channel
+
+`re/ir34_request_families.py`, OUTs with no payload: `0xB0` answers `03` for every value
+tried; `0xB8` answers `06` (values 1–2) or `05` (values 4–9, 0xFD); `0xC1` answers `00` or
+`05` and `00 0106` at `wValue 0xFD`; `0xC2` stalls with no payload. **`0xB9` answers at
+`wValue 1` → `00 000e0000` and `wValue 2` → `00 200f0000` and stalls at 4–9 and 0xFD.**
+`[CAPTURED]` The meaning of both values is `[UNKNOWN]`.
+
+### IR-35 and IR-37 — the device went into the dead state again, and `0xB8` is the suspect
+
+IR-35 (register-map diff between the `0xC0`-only arm and the full faithful arm) never ran:
+the arm accepted 134/134 OUTs, produced **0 MB/s on all four endpoints** and **0 of 52
+registers readable**. IR-37 characterised the state directly:
+
+| transfer | result |
+|---|---|
+| `0xC1` / `wValue 0xFD` | **answers `00 0106`** |
+| `0xC0`/7, `0xC0`/5, `0xC0`/3 register reads, `0xB8`, `0xB9`, `0xC2` | all IN stall, `errno 32 (EPIPE)` |
+| after `libusb reset` + reopen | identical |
+| after the full 134-transfer `0xC0` arm (134/134 accepted) | identical, 0 MB/s |
+
+`[CAPTURED]` **`0xC1`/`wValue 253` is answered by the FX3 bridge itself and is therefore the
+liveness indicator for the bridge, not for the headset.** Everything that has to be
+forwarded to the headset stalls. That is a new and useful diagnostic: it separates "the USB
+end of the pipe is fine" from "the far end is answering". `[VERIFIED]`
+
+The state was reached during IR-34, whose last actions were `0xB8`, `0xB0` and `0xB9` OUTs
+**carrying** the vendor payload `00 00 03 00 20` outside any arm sequence — every one of
+those INs stalled, and nothing afterwards worked. `[INFERRED]` as the cause; `[VERIFIED]`
+that the state exists and that no host-side procedure recovers it, which is the same
+finding as §14 and again required the operator to cycle the headset's power.
+
+**Trap for future experiments:** query-shaped probes on `0xB8` / `0xB0` / `0xB9` are not
+free. Treat them as state-changing, run them last, and check `0xC1`/`0xFD` plus one
+`3d21` register read before and after every batch.
+
+Artifacts, local to the working tree: `ir32_results.json`, `ir33_dump/register_map.json`,
+`ir33_dump/full_transcripts.json`, `ir34_families.json`, `ir35_mapdiff.json`, and the
+scripts `ir32_device_files.py`, `ir33_register_dump.py`, `ir34_request_families.py`,
+`ir35_map_diff.py`, `ir37_state_probe.py`.

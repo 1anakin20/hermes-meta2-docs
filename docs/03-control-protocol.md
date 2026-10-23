@@ -110,6 +110,50 @@ the only OUTs in the capture with no payload, and they are also the OUTs whose p
 was not recoverable from the passive capture — so "zero-length" may be a capture gap
 rather than a real zero-length command. `[UNCERTAIN]`
 
+### 3.3.1 The request codes are named in the vendor driver
+
+`Meta.Driver.dll`, class `Meta.Driver.Devices.Meta2CommandConstants`, names the request
+codes directly. `[CAPTURED]` from the IL disassembly (`ikdasm`); the responses were then
+read live on 2026-10-23 (`re/ir33_register_dump.py`, `re/ir34_request_families.py`).
+
+| Constant | `bRequest` | Named values | Live behaviour |
+|---|---|---|---|
+| `REQUEST_CODE_BASE` | `0xB0` | `1 = GET_DEVICE_TYPE` | answers `03` for every value tried (1, 2, 4, 5, 6, 7, 9, 0xFD) |
+| `REQUEST_CODE_STD` | `0xC0` | `2` memory read · `3` register access · `5` FPGA firmware date · `6` endpoint feed · `7` firmware version · `9` multiplexor feed | all in use in the arm |
+| `REQUEST_CODE_GEO` | `0xB9` | `4 = GEO_FIRMWARE_VERSION` | value 1 → `00 000e0000`, value 2 → `00 200f0000`; values 4–9 and 0xFD stall |
+| `REQUEST_CODE_USB` | `0xC1` | `253 = USB_FIRMWARE_VERSION` | `00 0106` |
+| `REQUEST_CODE_FILE` | `0xC2` | `4 = FILE_COMMAND` | `hwinfo.b` → `00 0000ff00` |
+
+`0xB8` is used on the wire (twice per arm) but is **not** named in this class. `[VERIFIED]`
+
+Two of these now have names attached to values that were already recorded above:
+`0xC0/7 → 00 013d` is the firmware version and `0xC1/0xFD → 00 0106` is the USB-side
+firmware version. `[INFERRED]` from the constant names only — nothing else corroborates
+the numeric meaning, and `bcdDevice` still reads `0.00`.
+
+`0xB9` had never been contacted before 2026-10-23. It answers, which means there is a
+second command channel beyond the `0xC0` register grammar. `[VERIFIED]`
+
+### 3.3.2 The `0xB8` response names the ToF sensor
+
+`0xB8` / `wValue 1` / payload `00 00 03 00 20` returns 33 bytes:
+
+```
+00 50 4d 44 54 45 43 03 00 b6 40 73 ec 43 3f 04 00
+50 4d 44 53 43 4c 00 04 3f 3f 00 02 00 01 00 00
+    ----PMDTEC----                       ----PMDSCL----
+```
+
+`[CAPTURED]`. The record structure is not resolved — `[UNKNOWN]`. What is not unknown is
+the name: **PMD** is the photonic-mixer-device class of ToF sensor, and the device's own
+calibration file declares frame index 9 as `g_pmd_cad` (see `11-device-files.md` §11.4).
+So this is the depth-sensor module table, and `0xB8` is the command family that reaches
+it. `[INFERRED]`
+
+`0xB8` answers status-only (`06` or `05`) when the OUT carries **no** payload, and its
+data IN stalls when the OUT carries the vendor payload outside the arm sequence. See
+§16 of `EVIDENCE.md` before sending `0xB8` transfers in an experiment.
+
 ## 3.4 Register grammar (class `0x0003`)
 
 Payload layout:
