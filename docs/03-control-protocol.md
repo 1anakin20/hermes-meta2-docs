@@ -120,19 +120,21 @@ read live on 2026-10-23 (`re/ir33_register_dump.py`, `re/ir34_request_families.p
 |---|---|---|---|
 | `REQUEST_CODE_BASE` | `0xB0` | `1 = GET_DEVICE_TYPE` | answers `03` for every value tried (1, 2, 4, 5, 6, 7, 9, 0xFD) |
 | `REQUEST_CODE_STD` | `0xC0` | `2` memory read · `3` register access · `5` FPGA firmware date · `6` endpoint feed · `7` firmware version · `9` multiplexor feed | all in use in the arm |
-| `REQUEST_CODE_GEO` | `0xB9` | `4 = GEO_FIRMWARE_VERSION` | value 1 → `00 000e0000`, value 2 → `00 200f0000`; values 4–9 and 0xFD stall |
+| `REQUEST_CODE_GEO` | `0xB9` | `4 = GEO_FIRMWARE_VERSION` | bare (no payload): value 1 → `00 000e0000`, value 2 → `00 200f0000`, values 4–9 and 0xFD stall. With its own payload `[4, 2]` it answers the GEO version — see `09-driver-decompiled.md`. |
 | `REQUEST_CODE_USB` | `0xC1` | `253 = USB_FIRMWARE_VERSION` | `00 0106` |
 | `REQUEST_CODE_FILE` | `0xC2` | `4 = FILE_COMMAND` | `hwinfo.b` → `00 0000ff00` |
 
 `0xB8` is used on the wire (twice per arm) but is **not** named in this class. `[VERIFIED]`
 
-Two of these now have names attached to values that were already recorded above:
-`0xC0/7 → 00 013d` is the firmware version and `0xC1/0xFD → 00 0106` is the USB-side
-firmware version. `[INFERRED]` from the constant names only — nothing else corroborates
-the numeric meaning, and `bcdDevice` still reads `0.00`.
+Two of these attach names to values already recorded above: `0xC0/7 → 00 013d` is the ARM
+firmware version and `0xC1/0xFD → 00 0106` is the USB/FX3-side firmware version. The
+decodings themselves are established in `09-driver-decompiled.md` (ARM 1.61, FPGA built
+2018-01-10 22:39:13 UTC, FX3 1.6, GEO 1.25); the constant names corroborate them but add
+nothing on their own, and `bcdDevice` still reads `0.00`.
 
-`0xB9` had never been contacted before 2026-10-23. It answers, which means there is a
-second command channel beyond the `0xC0` register grammar. `[VERIFIED]`
+`0xB9` had never been probed beyond its single named command (`/4` with `[4, 2]`). Bare it
+answers at two other values, so there is a second command channel beyond the `0xC0` register
+grammar with more than the one command the driver uses. `[VERIFIED]`
 
 ### 3.3.2 The `0xB8` response names the ToF sensor
 
