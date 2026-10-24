@@ -1351,3 +1351,79 @@ half, three-quarter and full scale of a 12-bit range. `[VERIFIED]` as measured c
 
 A global mean cannot distinguish "the whole frame moved to a new level" from "half the frame moved
 to a new level". IR-60 was written to make that distinction.
+
+## 24. IR-60 — the depth frame is not spatially organised by the register table, and the vendor output is one cluster (2026-10-24)
+
+Frame-level capture per setting (3 s of EP 0x84 while strobing, resynchronised on the
+`0xDEAD`/`0xF00D` descriptor pair, 352×288 image blocks). Parser validated offline against
+`ir29_tof_ep84.bin` first: 4,957 frames resynchronised, row-0 sentinel 93.41%, rows 1+ 0.005% —
+matching §12.14 independently.
+
+### 24.1 Correction to §23.2: the vendor mode is a **single** cluster `[VERIFIED]`
+
+§23.2 inferred mixtures from quartile signatures. The frame capture shows the vendor operating
+point is **not** a mixture:
+
+```
+control histogram peaks (value, count): 2033, 2027, 2029, 2023, 2025, 2035
+control band occupancy 0-1023 / 1024-2047 / 2048-3071 / 3072-4094 / 4095:
+                                  0.04%   70.68%     28.89%      0.35%     0.04%
+```
+
+Every peak sits between 2023 and 2035. The 70.68 / 28.89 split across the 2048 boundary is one
+broad cluster straddling that boundary, **not** two clusters. `[WITHDRAWN]` the implied reading that
+the vendor signature `1952/2007/2030/2052/2113` is a blend of two levels — it is one level.
+
+The mixture reading **does** hold for the perturbed settings, where band occupancy and quartiles
+agree: `0x1500` → peaks at ~1005 **and** ~2051, bands 51.59% / 19.25% / 29.01%; `0x150a` → 70.89% in
+1024–2047 and 29.03% in 3072–4094 with quartiles 1952/2007/2029/**3076/3137**.
+
+### 24.2 The spatial-table hypothesis is **refuted** `[VERIFIED]`
+
+The hypothesis worth refuting was that `0xb00e`'s ten slots index ten regions of the frame, so that
+changing a slot changes some rows and not others — which would explain a global histogram that moves
+with registers but never with the scene.
+
+Diff of per-row and per-column means against control:
+
+| setting | rows changed >20 counts | cols changed >20 counts | max row change | max col change |
+|:---|---:|---:|---:|---:|
+| `0xb00e` slot5 lo=0x00 | 288/288 | 352/352 | 2353 | 885 |
+| `0xb00e` slot5 lo=0x0a | 288/288 | 352/352 | 344 | 490 |
+| `0xb00e` slot5 hi=0x0a | 288/288 | 352/352 | 3645 | 1632 |
+| `0xb00e` slot5 hi=0x25 | 288/288 | 348/352 | 2615 | 1474 |
+| `0xb00e` slot5 hi=0x00 | 288/288 | 352/352 | 3597 | 1210 |
+
+Every variant changes **every** row and **every** column. And the per-row means stay flat under
+perturbation — `0x1500` gives 1338, 1348, 1349, 1368, 1335, 1361, 1347, 1338, 1332, 1330 sampled
+every 24 rows. A per-row or per-column band table would have moved some rows and left others alone.
+It did not. `[WITHDRAWN]` the per-slot spatial-table hypothesis.
+
+Row 0 remains distinct in every setting (mean 3633 / 4870 / 3596 / 7278 / 5769 / 7230 versus ~2041 /
+1340 / 2330 / 3390 / 2900 / 1420 for the rest of the frame), consistent with the configured y-window
+of §22.2.
+
+### 24.3 The cluster centres sit just below multiples of 1024 `[VERIFIED]` measurement, `[INFERRED]` meaning
+
+| cluster centre | nearest multiple of 1024 | offset |
+|---:|:---|---:|
+| ~1005 | 1 × 1024 = 1024 | −19 |
+| ~2030 | 2 × 1024 = 2048 | −18 |
+| ~3100 | 3 × 1024 = 3072 | +28 |
+| ~4077 | 4 × 1024 = 4096 | −19 |
+
+Four independent clusters, three of them within 19 counts of a quarter-scale step. `[INFERRED]` that
+the depth body reports quarter-scale levels rather than a continuous range; the offsets are not
+explained and are not small enough to call them rounding.
+
+### 24.4 The two cleanest outputs produced so far `[VERIFIED]`
+
+- **Flat mode** (`0xa882 op 0x60` byte3 = `0x40`): peak 2035 carries 10,162,570 of ~17.4 M samples —
+  **58% of every sample in the capture is exactly 2035**, and the next-busiest value has a count of
+  2,057. Band occupancy 99.92% in 1024–2047. This is a constant output.
+- **Narrow-and-fast mode** (byte3 = `0x56`): a tight unimodal cluster at ~1980, 99.52% in one band,
+  rate 14 MB/s. The cleanest non-constant output obtained.
+
+A device that can be made to emit a constant is a device whose measurement path can be switched
+off. That makes 2035 a strong candidate for the no-signal level, and it sharpens rather than softens
+the open question: no register setting found so far produces data that varies with the room.
