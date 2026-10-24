@@ -1048,3 +1048,186 @@ one-sided p = 7.77 × 10⁻⁵. Detector validated against a TV remote first.
   illumination is off under the host-only arm. Illumination is on. `[WITHDRAWN]`
 - **Still open:** whether the lit emitter is the ToF illuminator specifically (`[INFERRED]`), and
   what makes the depth body respond to the scene now that illumination is ruled out as the cause.
+
+## 22. IR-56 / IR-57 / IR-58 — the depth-band registers are live knobs, and none of them is linear (2026-10-24)
+
+All three runs are host-only, same harness (`re/tof_probe.py`), each variant bracketed by an
+unmodified-arm control at the start and at the end. Every variant does `reset_open()` first, so
+variants are comparable. Substitutions are **in place** at the site's own position in the arm.
+
+Method note that matters for reading the numbers: the control-to-control drift was tiny in all
+three runs — **0.28 counts** (IR-56), **0.03 counts** (IR-57), and the same order in IR-58. Any
+effect above a few counts is therefore real, not run-to-run noise.
+
+### 22.1 IR-56: `0xb00e` is position-sensitive `[VERIFIED]`
+
+IR-47/48/49 established `0xb00e` as a mode register by substituting a **uniform** byte into all
+20 data positions. That experiment destroyed the table's structure, so it could never show
+whether the **positions** carry information. This run XOR-ed `0xFF` into exactly one byte at a
+time.
+
+Vendor table (site 84, opcode `0x60`, 20 data bytes):
+
+```
+15 15 15 15 15 15 15 15 15 15 15 15 13 15 15 13 15 15 04 15
+                                 ^        ^        ^
+                              pos 12   pos 15   pos 18
+```
+
+Controls: mean 2037.24 → 2037.52, sd 141.22 → 142.54, sentinel 0.403% → 0.411%, EP 0x84
+9.18 → 9.18 MB/s. **Drift 0.28 counts.**
+
+| pos | vendor | Δmean | sd | sentinel % | verdict |
+|----:|:------:|------:|---:|-----------:|:--------|
+| 0 | 15 | +1.29 | 142.95 | 0.415 | no effect |
+| 1 | 15 | +0.82 | 143.01 | 0.416 | no effect |
+| 2 | 15 | +4.27 | 142.64 | 0.412 | no effect |
+| 3 | 15 | +2.11 | 141.43 | 0.406 | no effect |
+| 4 | 15 | **+15.93** | 141.75 | 0.404 | matters |
+| 5 | 15 | **+8.38** | 143.51 | 0.418 | matters |
+| 6 | 15 | **+37.86** | 161.84 | 0.414 | matters |
+| 7 | 15 | **+23.71** | 146.02 | 0.402 | matters |
+| 8 | 15 | **+150.17** | 289.38 | 0.407 | matters |
+| 9 | 15 | **+75.23** | 195.97 | 0.410 | matters |
+| 10 | 15 | **+1438.78** | 909.28 | 1.487 | matters |
+| 11 | 15 | **+300.07** | 505.91 | 0.417 | matters |
+| 12 | 13 | +0.28 | 142.82 | 0.413 | no effect |
+| 13 | 15 | +0.12 | 141.06 | 0.402 | no effect |
+| 14 | 15 | −0.01 | 140.96 | 0.401 | no effect |
+| 15 | 13 | +0.16 | 142.15 | 0.409 | no effect |
+| 16 | 15 | −1.10 | 123.62 | 0.320 | matters (sd only) |
+| 17 | 15 | +0.06 | 140.86 | 0.400 | no effect |
+| 18 | 04 | +0.23 | 142.03 | 0.408 | no effect |
+| 19 | 15 | **−11.85** | 149.50 | 0.444 | matters |
+
+**10 of 20 positions change the output.** The table is not a mode byte replicated 20 times.
+
+Two structural facts fall out:
+
+1. **Sensitivity grows geometrically with byte position, then collapses.** Taking the high byte of
+   each 2-byte slot: slot 0 → 1.29, slot 1 → 4.27, slot 2 → 15.93, slot 3 → 37.86, slot 4 → 150.17,
+   slot 5 → **1438.78**, then slot 6 → 0.28, slot 7 → 0.01, slot 8 → 1.10, slot 9 → 0.23. A factor
+   of ~3–4 per slot across slots 0–5, then dead. `[VERIFIED]` as an observation; the mechanism is
+   unknown.
+2. **The high-byte / low-byte effect ratio is ~1.6–2.3, not 255.** If the 20 bytes were ten
+   independent linear `u16` values, XOR into the high byte would change the value by 255 and into
+   the low byte by 1, so a linear knob would predict a ratio near 255. Observed ratios per slot:
+   1.6, 2.0, 1.9, 1.6, 2.0, 4.8, 2.3, 0.1, 18.3, 0.0. The table is therefore **not** ten linear
+   16-bit knobs. `[INFERRED]`, from the ratio pattern.
+
+A coincidence worth recording: the three positions the vendor deliberately sets away from `0x15`
+(12, 15, 18) are all **insensitive**, while the sensitive positions are all vendor `0x15`. The
+vendor's own exceptions are don't-cares. `[VERIFIED]` observation, no interpretation attached.
+
+Position 10 is the strongest single byte found anywhere in the depth band: mean 3476.02, quartiles
+2049/2086/4050/4074/4095 — the distribution splits against the invalid ceiling.
+
+### 22.2 IR-57: byte-level sensitivity of `0xa882` and `0xa886` `[VERIFIED]`
+
+Perturbation was the mildest possible, XOR `0x01`, which flips one bit and leaves the value
+recognisable. Controls: mean 2037.37 → 2037.34, sd 141.23 → 141.24, sentinel 0.404% → 0.404%,
+distinct 564 → 564. **Drift 0.03 counts, and `distinct` identical** — the tightest control band in
+this project so far.
+
+`0xa882`, two write sites:
+
+```
+op 0xa0  02 80 10 57 00 00 00 04     (8 bytes)
+op 0x60  02 80 10 57                 (4 bytes)
+```
+
+| site | byte | vendor | result |
+|:-----|-----:|:------:|:-------|
+| op 0xa0 | 0–4 | 02 80 10 57 00 | all inert |
+| op 0xa0 | 5 | 00 | **breaks framing**: EP 0x84 0.13 MB/s, sentinel 5.70%, quartiles 6/2007/2026/2046/4095 |
+| op 0xa0 | 6 | 00 | moments unchanged, but **distinct 1495 vs 564** — support nearly triples with the same mean and sd |
+| op 0xa0 | 7 | 04 | **bimodal**: mean 3046.54, sd 1592.79, distinct 2690, quartiles 1/2029/4022/4060/4095 |
+| op 0x60 | 0 | 02 | inert |
+| op 0x60 | 1 | 80 | **silences EP 0x84** |
+| op 0x60 | 2 | 10 | mild: mean 2038.22, distinct 627 |
+| op 0x60 | 3 | 57 | **live parameter**: mean 1987.50 (−49.9), distinct **237** (narrowed from 564), EP 0x84 **14.04 MB/s** (up from 9.55) |
+
+The `op 0x60` byte 3 result is the most interesting single number in this run: flipping one bit
+moved the mean by −49.9 counts, **narrowed** the support from 564 distinct values to 237, and
+**raised** the endpoint rate by 47%. A narrower support at a higher rate is not a broken mode; it
+looks like a parameter that changes what the device is integrating. `[VERIFIED]` effect,
+`[INFERRED]` interpretation.
+
+`0xa886`, read back as four `u16` big-endian values:
+
+```
+0000 015f 0001 0120   ->   0, 351, 1, 288
+```
+
+That is a window: x from 0 to 351, y from **1** to 288. The wire frame is 352×288 and the
+calibrated image is 352×**287** (§11.7). A window that starts at y = 1 independently confirms that
+row 0 is excluded **by configuration**, not by accident. `[VERIFIED]` values; `[INFERRED]` that the
+four values are a bounding window.
+
+Byte sensitivity of `0xa886` matches that reading:
+
+| byte | vendor | result |
+|-----:|:------:|:-------|
+| 0 | 00 | mean 2035.09, distinct 1166, EP 0x84 11.17 MB/s |
+| 1 | 00 | **silences EP 0x84** (x-maximum low byte) |
+| 2 | 01 | mean 2036.94, distinct 1139, EP 0x84 11.18 MB/s |
+| 3 | 5f | **silences EP 0x84** (351 → 350: window no longer matches the emitted frame) |
+| 4 | 00 | mean 2092.30, sd 369.73, sentinel 3.09%, distinct 2543 |
+| 5 | 01 | inert |
+| 6 | 01 | mean 2094.27, sd 369.33, sentinel 3.09%, distinct 2427 |
+| 7 | 20 | inert |
+
+Bytes 4 and 6 produce **nearly identical** results (2092.30 / 2094.27, sd 369.7 / 369.3, sentinel
+3.093% in both) — consistent with them being the two high bytes of the same pair of window values.
+
+### 22.3 IR-58: `0xa88f` is a stepped selector, not a bias `[VERIFIED]`
+
+IR-50 found that XOR `0xFF` into `0xa88f` moved the mean 2036.6 → 2427.6 and shifted every quartile
+by the same ~391 counts, which looks exactly like an additive term. This run swept the `u16` across
+its range to test linearity. **It is not linear.**
+
+| value | hi | lo | mean | sd | quartiles |
+|------:|:--:|:--:|-----:|---:|:---------|
+| 0x0000 | 00 | 00 | 2089.22 | 138.50 | 2060/2081/2104 |
+| 0x00ff | 00 | ff | 2021.74 | 142.42 | 1990/2014/2038 |
+| 0x0100 | 01 | 00 | 2089.22 | 138.19 | 2060/2081/2104 |
+| 0x0200 | 02 | 00 | 2089.34 | 139.41 | 2060/2081/2104 |
+| 0x0300 | 03 | 00 | 2089.26 | 138.73 | 2060/2081/2104 |
+| **0x031e** (vendor) | 03 | 1e | 2037.42 | 142.09 | 2007/2029/2052 |
+| 0x033c | 03 | 3c | 2037.30 | 141.62 | 2007/2029/2052 |
+| 0x035a | 03 | 5a | 2077.33 | 140.98 | 2047/2069/2092 |
+| 0x0400 | 04 | 00 | 2430.63 | 122.78 | 2403/2426/2449 |
+| 0x0500 | 05 | 00 | 2430.69 | 122.75 | 2403/2426/2449 |
+| 0x0600 | 06 | 00 | 2430.83 | 123.53 | 2403/2426/2449 |
+| 0x0700 | 07 | 00 | 2430.78 | 123.13 | 2403/2426/2449 |
+| 0x07ff | 07 | ff | 2475.81 | 144.87 | 2435/2493/2529 |
+
+Linear fit: `mean = 0.2579 × value + 1972.80`, **R² = 0.685**, worst residual **+193.72 counts** at
+0x0400. The linear model is rejected.
+
+The structure that does fit:
+
+- With `lo = 0x00`, `hi = 0x00, 0x01, 0x02, 0x03` give 2089.22, 2089.22, 2089.34, 2089.26 —
+  identical to 0.12 counts. `hi = 0x04, 0x05, 0x06, 0x07` give 2430.63, 2430.69, 2430.83, 2430.78 —
+  identical to 0.20 counts. **The high byte has exactly one threshold, between 3 and 4, and is
+  otherwise ignored.**
+- With `hi = 0x03`, `lo = 0x00, 0x1e, 0x3c, 0x5a` give 2089.26, 2037.42, 2037.30, 2077.33 —
+  **non-monotonic**.
+- 0x00ff and 0x0100 differ by 1 in value but give 2021.74 and 2089.22 — 67 counts apart.
+
+`0xa88f` selects between discrete output levels (~2022, ~2037, ~2089, ~2431, ~2476). It is a
+selector, not a bias, and the "+391 shift" from IR-50 was one step of that ladder, not a slope.
+
+### 22.4 What this changes
+
+- The earlier reading of `0xb00e` as "a mode register" is **incomplete but not wrong**: it is a
+  mode register **and** a position-structured table. `[VERIFIED]`
+- `0xa886` is now the best-understood register in the band: four `u16` values that read as a
+  352-wide, y-from-1 window. `[VERIFIED]` values.
+- `0xa882 op 0x60` byte 3 is the first register found whose perturbation **narrows** the output
+  distribution while **raising** the rate. It is the strongest remaining candidate for a real
+  integration/modulation parameter. `[VERIFIED]` effect.
+- No register swept so far behaves linearly. Any model of the depth path as "output = f(scene) +
+  register offsets" is not supported by these data. `[VERIFIED]` for the registers tested.
+- **Still open:** whether any setting of these registers makes the depth body scene-responsive.
+  None of IR-56/57/58 tested scene response; they tested register response.
