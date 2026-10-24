@@ -559,3 +559,38 @@ strongly, and none of them behaves linearly — which weakens the model "output 
 offsets" and points instead at a device whose depth body is assembled from discrete configuration
 levels. The next decisive step is to sweep `0xa882 op 0x60` byte 3 and `0xb00e` slot 5 finely and
 look for a setting where the distribution becomes scene-dependent, rather than merely shifted.
+
+## 12.17 The registers are mode selectors, and what they select is a device-fixed pattern
+
+IR-56 through IR-61b were all host-only. Full data: `EVIDENCE.md` §22–§25.
+
+**The registers are live, and none of them is a linear knob.** `0xb00e` changes the output at 10 of
+20 byte positions against a control drift of 0.28 counts, with sensitivity growing ~3–4× per slot
+across slots 0–5 and then collapsing. `0xa882 op 0x60` byte 3 resolves into five discrete modes
+(flat, vendor, narrow-and-fast, broken, all-invalid) with mean-fit R² = 0.0124. `0xa88f` resolves
+into stepped levels with R² = 0.685 and a +194-count worst residual. `0xb00e` slot 5 produces ten
+recurring output signatures, and the slope ratio between its high and low byte is 0.01 where a single
+linear 16-bit value predicts 256.
+
+**`0xa886` is the one register with a readable meaning:** `0000 015f 0001 0120` = 0, 351, 1, 288 — a
+window of x 0…351 and y **1**…288, which makes the row-0 sentinel a configured exclusion rather than
+an artifact.
+
+**The frame is not organised by the table.** Perturbing `0xb00e` slot 5 changes all 288 rows and all
+352 columns, and per-row means stay flat. The idea that the table's ten slots index ten regions of
+the image is refuted.
+
+**The frame is a pattern the device generates.** With 2,295 frames per pass and three independent
+arms, the vendor configuration gives within-arm split-half correlation **0.9950** and cross-reset
+correlation **0.9567** with a mean absolute difference of 4.27 counts. Two of three arms agree very
+closely; the third landed in a different state. So EP 0x84 under our arm is stable within an arm and
+reproducible across a port reset — which is consistent with the negative scene test and with the
+register-level shifts, and inconsistent with both random noise and room-dependent data.
+
+**Where that leaves the ToF goal.** We can obtain, frame, geometry-check, mode-select and
+reproducibly reproduce the depth endpoint. We still cannot interpret its samples as distance, and we
+now have a precise reason: the registers choose *which level* a generated pattern reports, and no
+register setting found so far puts the device into a state where the reported value depends on the
+room. The remaining unknown is the configuration that enables measuring, and the vendor SDK is the
+only known producer of that state. The next decisive experiment is SDK-side: read the depth the SDK
+itself reports and test whether it responds to the scene.
