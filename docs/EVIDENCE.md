@@ -1231,3 +1231,123 @@ selector, not a bias, and the "+391 shift" from IR-50 was one step of that ladde
   register offsets" is not supported by these data. `[VERIFIED]` for the registers tested.
 - **Still open:** whether any setting of these registers makes the depth body scene-responsive.
   None of IR-56/57/58 tested scene response; they tested register response.
+
+## 23. IR-59a / IR-59b — the two strongest registers are mode selectors, and the modes are mixtures of quarter-scale levels (2026-10-24)
+
+Fine sweeps of the two leads from §22, same harness, in-place substitution, controls at both ends.
+
+### 23.1 IR-59a: `0xa882 op 0x60` byte 3 is a **mode selector**, not a knob `[VERIFIED]`
+
+Controls: mean 2037.40 → 2037.45, drift 0.06 counts.
+
+| byte3 | mean | sd | distinct | sentinel % | EP 0x84 MB/s | quartiles p25/p50/p75 |
+|------:|-----:|---:|--------:|-----------:|-------------:|:----------------------|
+| 0x40 | 2029.57 | 149.26 | 66 | 0.125 | 5.79 | 2035/2035/2036 |
+| 0x48 | 2015.09 | 225.55 | 248 | 0.120 | 5.89 | 2035/2035/2036 |
+| 0x50 | 2025.39 | 172.44 | 1056 | 0.115 | 5.58 | 2035/2035/2036 |
+| 0x54 | 2017.59 | 219.29 | 691 | 0.141 | 5.78 | 2035/2035/2036 |
+| 0x55 | 2975.10 | 1791.03 | 67 | 71.689 | 0.01 | 789/4095/4095 |
+| **0x56** | 1987.56 | 138.44 | 228 | 0.400 | **14.04** | 1962/1980/1998 |
+| **0x57** (vendor) | 2037.61 | 143.13 | 560 | 0.415 | 9.00 | 2007/2030/2052 |
+| 0x58 | 2024.42 | 179.85 | 521 | 0.120 | 5.70 | 2035/2035/2036 |
+| 0x59 | 2976.11 | 1790.76 | 59 | 71.729 | 0.01 | 791/4095/4095 |
+| **0x5A** | 1987.69 | 138.56 | 278 | 0.400 | **13.95** | 1962/1980/1998 |
+| 0x60 | 4059.50 | 379.35 | 66 | 99.131 | 5.75 | 4095/4095/4095 |
+| 0x70 | 2025.50 | 174.46 | 65 | 0.125 | 5.79 | 2035/2035/2036 |
+| 0x77 | 2030.49 | 74.62 | 352 | 0.078 | 9.23 | 2007/2029/2052 |
+
+**Linearity is rejected outright.** Fits over the byte value: mean `R² = 0.0124` (worst residual
++1701 counts), distinct `R² = 0.0173`, endpoint rate `R² = 0.0215`, sd `R² = 0.0045`. There is no
+knob here at all.
+
+What there is instead is a set of **reproducible discrete modes**:
+
+- **Flat mode** — quartiles `2035/2035/2036`, i.e. p25 = p50 = p75 to the count. The output is
+  essentially a constant 2035 with a small minority of other values supplying the sd. Rate ~5.6–5.9
+  MB/s, sentinel ~0.12%. Entered by 0x40, 0x48, 0x50, 0x54, 0x58, 0x70.
+- **Vendor mode** — `2007/2030/2052`, sd 143, rate 9.0–9.2 MB/s. Entered by 0x57 and 0x77.
+- **Narrow-and-fast mode** — `1962/1980/1998`, sd 138, distinct only 228–278, rate **13.95–14.04
+  MB/s**. Entered by 0x56 and 0x5A. This is the mode IR-57 found by a single bit flip, and it is
+  reproducible from two different byte values, so it is a real device mode and not an accident.
+- **Broken mode** — `789/4095/4095`, sentinel 71.7%, rate 0.01 MB/s. Entered by 0x55 and 0x59.
+- **All-invalid mode** — `4095/4095/4095`, sentinel 99.13%. Entered by 0x60.
+
+The vendor value sits adjacent to a broken mode on one side (0x55) and the narrow-and-fast mode on
+the other (0x56). `[VERIFIED]` adjacency; no claim about why.
+
+### 23.2 IR-59b: `0xb00e` slot 5 produces **10 discrete output modes** `[VERIFIED]`
+
+Slot 5 is bytes 10 and 11 of the `0xb00e` table (vendor `0x15 0x15`), the peak of the sensitivity
+ladder in §22.1. Phase A varied the high byte with the low byte held at vendor; phase B the reverse.
+Controls: mean 2037.40 → 2037.45, drift 0.06 counts.
+
+Phase A (high byte varied, low = 0x15):
+
+| slot5 | mean | sd | distinct | sentinel % | quartiles p1/p25/p50/p75/p99 |
+|------:|-----:|---:|--------:|-----------:|:-----------------------------|
+| 0x0015 | 1431.14 | 910.19 | 549 | 0.079 | 1/39/2002/2026/2047 |
+| 0x0515 | 2037.24 | 140.89 | 848 | 0.401 | 1952/2007/2029/2052/2113 |
+| 0x0a15 | 3476.51 | 909.09 | 543 | 1.463 | 2049/2087/4050/4074/4095 |
+| 0x0f15 | 3476.42 | 909.12 | 893 | 1.467 | 2049/2087/4050/4074/4095 |
+| 0x1515 | 2037.41 | 141.75 | 566 | 0.406 | 1952/2007/2030/2052/2113 |
+| 0x1f15 | 1431.52 | 910.15 | 545 | 0.082 | 1/39/2002/2026/2047 |
+| 0x2515 | 2870.14 | 1838.73 | 545 | 1.146 | 1/39/4050/4074/4095 |
+| 0x3515 | 2871.52 | 1838.05 | 564 | 1.144 | 1/39/4050/4074/4095 |
+| 0x5515 | 2037.36 | 141.81 | 561 | 0.407 | 1952/2007/2029/2052/2113 |
+| 0x7515 | 2869.70 | 1838.87 | 558 | 1.145 | 1/39/4050/4074/4095 |
+| 0xea15 | 3477.15 | 908.83 | 544 | 1.481 | 2049/2087/4051/4074/4095 |
+
+Phase B (low byte varied, high = 0x15):
+
+| slot5 | mean | sd | distinct | sentinel % | quartiles p1/p25/p50/p75/p99 |
+|------:|-----:|---:|--------:|-----------:|:-----------------------------|
+| 0x1500 | 1314.51 | 508.32 | 589 | 0.082 | 928/983/1006/2052/2113 |
+| 0x1505 | 2037.42 | 142.09 | 962 | 0.407 | 1952/2007/2030/2052/2113 |
+| 0x150a | 2336.56 | 505.41 | 558 | 0.409 | 1952/2007/2029/3076/3137 |
+| 0x150f | 2336.91 | 505.61 | 599 | 0.409 | 1952/2007/2029/3076/3137 |
+| 0x1515 | 2037.21 | 140.34 | 552 | 0.397 | 1952/2007/2030/2052/2113 |
+| 0x151f | 1314.52 | 508.55 | 545 | 0.082 | 928/983/1006/2052/2113 |
+| 0x1525 | 1614.94 | 963.38 | 565 | 0.082 | 928/983/1006/3076/3131 |
+| 0x1535 | 1613.85 | 962.74 | 1323 | 0.072 | 928/983/1006/3076/3131 |
+| 0x1555 | 2037.22 | 140.34 | 1547 | 0.396 | 1952/2007/2030/2052/2113 |
+| 0x1575 | 1614.65 | 963.17 | 566 | 0.077 | 928/983/1006/3076/3131 |
+| 0x15ea | 2337.75 | 505.75 | 796 | 0.402 | 1952/2007/2030/3076/3137 |
+
+**Not a linear 16-bit value.** Slope of mean against the slot value: phase A (high byte) 0.01764,
+phase B (low byte) 1.42026 — a ratio of **0.01**, where a single linear `u16` knob predicts ~256.
+The low byte dominates.
+
+**The modes are mixtures of a small set of value clusters.** Clustering all 22 variants by quartile
+signature gives 10 signatures, and the same signature recurs from different slot values:
+
+| quartile signature | mean | sd | variants producing it |
+|:---|---:|---:|:---|
+| 1952/2007/2030/2052/2113 | 2037.32 | 141.1 | A:0x1515, B:0x1505, B:0x1515, B:0x1555 |
+| 1/39/4050/4074/4095 | 2870.45 | 1838.5 | A:0x2515, A:0x3515, A:0x7515 |
+| 928/983/1006/3076/3131 | 1614.48 | 963.1 | B:0x1525, B:0x1535, B:0x1575 |
+| 1/39/2002/2026/2047 | 1431.33 | 910.2 | A:0x0015, A:0x1f15 |
+| 1952/2007/2029/2052/2113 | 2037.30 | 141.3 | A:0x0515, A:0x5515 |
+| 2049/2087/4050/4074/4095 | 3476.47 | 909.1 | A:0x0a15, A:0x0f15 |
+| 928/983/1006/2052/2113 | 1314.51 | 508.4 | B:0x1500, B:0x151f |
+| 1952/2007/2029/3076/3137 | 2336.73 | 505.5 | B:0x150a, B:0x150f |
+
+Read as mixtures of five recurring clusters —
+
+```
+L5  ~    1 /   39
+L1  ~  928 /  983 / 1006
+L2  ~ 1952 / 2007 / 2030 / 2052   <- the vendor operating point
+L3  ~ 3076 / 3131
+L4  ~ 4050 / 4074 / 4095
+```
+
+— every signature is two clusters blended: `0x1500` is L1 in its lower half and L2 in its upper
+half; `0x150a` is L2 below and L3 above; `0x2515` is L5 below and L4 above. `[VERIFIED]` that the
+histograms are two-cluster mixtures.
+
+**The cluster centres are spaced by ~1024.** L1 ≈ 1006, L2 ≈ 2030, L3 ≈ 3100, L4 ≈ 4095 — quarter,
+half, three-quarter and full scale of a 12-bit range. `[VERIFIED]` as measured cluster centres;
+`[INFERRED]` that the depth body reports quarter-scale levels rather than a continuous range.
+
+A global mean cannot distinguish "the whole frame moved to a new level" from "half the frame moved
+to a new level". IR-60 was written to make that distinction.
