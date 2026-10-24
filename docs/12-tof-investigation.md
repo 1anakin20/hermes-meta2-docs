@@ -909,3 +909,116 @@ not to the value written into the covered span. `[VERIFIED]` that it happens, `[
 
 Scripts: `re/ir67_band_write.py`, `re/ir68_band_vendor_order.py`. Results:
 `re/ir67_band_write.json`, `re/ir68_band_vendor_order.json`.
+
+## 12.26 Static trace of the vendor's own ToF configuration path (2026-10-24)
+
+Device-free work done while the physical Windows test was being set up. All findings are from
+disassembly (`objdump -d -C`) and export-table parsing of the SDK binaries; nothing was sent to
+the device.
+
+**`ConfigureTofCamera` does not touch the wire.** `meta2_host_impl.dll` has 2896 exports.
+`?ConfigureTofCamera@SAQDriverManagerAdapterCls@sdc@@` is at RVA `0x1f0d0`. Its body walks a
+list rooted at `this+0x88`, finds a config node, and copies the incoming `sdc::TofConfig`
+(16 bytes via `movups` plus a `u32` at `+0x10`) into that node at `+0x20`/`+0x30`. There is no
+control transfer, no register address, no device handle anywhere in it. `[VERIFIED]` by
+disassembly.
+
+**The `InitConfigImpl` configure entry points are a shared stub.** `ConfigureTofCamera`,
+`ConfigureLed`, `ConfigureMic`, `ConfigureButton` and `ConfigureThermometers` on
+`InitConfigImpl` all resolve to the *same* RVA `0x2dd90`. `[VERIFIED]` So the "configure the
+sensors" facade in that class implements nothing per-sensor.
+
+**Endpoint sizing depends on USB speed.** The adapter's open path at `0x18001f170` opens
+`0x2cfa:0x00f3` and branches on `this+0x10178 == 2` (the `USBConnectionType::USB30` value).
+USB3 sets `+0x8 = 0x20` and `+0x18 = 0x10`; USB2 sets both to `1`. Common to both:
+`+0xc = 0x10`, `+0x10 = 0x10`, `+0x14 = 1`, `+0x1c = 0x10`, `+0x20 = 8`, `+0x24 = 8`.
+`[VERIFIED]` that the code does this; `[UNKNOWN]` what each field controls. It is consistent
+with per-endpoint transfer/buffer sizing, and it means a no-SDK reader's buffer strategy is
+speed-dependent.
+
+**The vendor protocol has two depth frame slots and three spare ones.** Exported from both
+`meta2_host_itf.dll` and `meta2_host_impl.dll`:
+`Data_RegisterNewNearDepthFrame`, `Data_RegisterNewFarDepthFrame`, `Data_RegisterNewAltFrame`,
+`Data_RegisterNewBogus0Frame`, `Data_RegisterNewBogus1Frame`, plus `produceDepth` on
+`sdc::SAQWorkPoolCls<std::shared_ptr<sdc::ImageData>>`. `[VERIFIED]` as exported symbols;
+`[UNKNOWN]` which endpoint each binds to, and whether "near"/"far" are two modulation
+frequencies or two ranges of one frame.
+
+**Thermometers and buttons are real SDK streams, still unseen on the wire.** The binaries
+contain `std::map<uint32_t, sdc::ThermoConfig>` and
+`std::map<uint32_t, std::function<void(std::shared_ptr<sdc::ButtonData>)>>` (mangled type
+names). `[VERIFIED]` that the SDK models them as id-indexed streams; `[UNKNOWN]` how to enable
+them — the multiplexor mask with `MICS`/`BUTTONS` set was already tried and produced nothing
+(see 12.12 and `docs/10-enable-masks.md`).
+
+**`getModuleConfigSAQ` is not a static table.** In `royale.2.3.1.dll` it is export ordinal 316
+at RVA `0x277a`, a thunk to the real body at `0x1800a7310`. The body allocates `0x108` bytes
+and copies fields from a global block at `0x1803b3180`–`0x1803b3288`. That block lies past the
+end of `.data`'s file-backed bytes (`.data` vaddr `0x3a3000` vsize `0x19958`, rawsize only
+`0xc400`), i.e. it is BSS: it is filled at **runtime** by an initializer around
+`0x18005e5b1`, which builds the config from calls plus `.rdata` constants. The only literal
+frequency visible in that initializer is `0x55D4A80` = **90,000,000**, stored as a `double` at
+config `+0x80`. `[VERIFIED]` the structure; `[UNKNOWN]` the meaning of the fields.
+
+**No modulation-frequency table found in `.rdata`.** Aligned scan of `.rdata` (921,600 B):
+580 `u32` values in 10–60 MHz, 170 `float` values, and 3 integral `double` values. The round
+numbers are `15,000,000` and `20,000,000` adjacent at `0x2cd440`/`0x2cd450`, `12,000,000` at
+`0x2d902c`, `30,000,000` at `0x2da9f4` — but they sit in a general constants pool (the
+`30,000,000` float is adjacent to the string "SAQ handles can not be opened on ce closed"),
+not in a use-case record structure. `[VERIFIED]` the scan; `[UNKNOWN]` whether any of these
+are modulation frequencies. The earlier arithmetic estimate of ~30.5 MHz from the shell radius
+(12.24) remains an inference, not a reading.
+
+**Net conclusion.** The vendor's own ToF configuration path in `meta2_host_impl.dll` puts no
+modulation or use-case command onto the USB wire — `ConfigureTofCamera` is memory-only. With
+IR-63 (vendor `0xb800` blob inert), IR-66 (band readable), IR-67/IR-68 (band writable but
+inert), the remaining place where a use case can be installed is royale's bridge
+(`BridgeSAQBase::executeUseCase`, `BridgeEnclustra`) talking to the imager/FPGA over I2C/SPI
+*inside* the device, reached through the same `0xC0` register channel. Every register site
+reachable from the host arm has now been probed and none governs EP 0x84's output. The
+decisive test is the physical Windows run, not another host-side sweep.
+
+## 12.27 The SDK has a direct I2C / SPI / GPIO tunnel to the imager (2026-10-24)
+
+Named-export inventory of `meta2_host_itf.dll` (1918 exports), `meta2_host_impl.dll` (2896) and
+`royale.2.3.1.dll` (712) is published as `artifacts/sdk_config_exports.txt`. The important part
+is on `sdc::SAQDriverManagerAdapterCls` in `meta2_host_impl.dll`:
+
+```
+0x00020bb0 / 0x00020c40 / 0x00020d30   ReadI2C   (three overloads: E / EG / EE forms)
+0x00022610 / 0x000226c0 / 0x00022770   WriteI2C  (same three forms)
+0x00020b80                             ReadFromSPIMemory(SAQSPIDevice, u32 addr, u8*, size_t&)
+0x00022980                             WriteToSPIMemory(SAQSPIDevice, u32 addr, const u8*, u32)
+0x00021950                             SetGPIO(int, int)
+0x00020360 / 0x000215e0                GetAnalogGain / SetAnalogGain
+0x00020480 / 0x000217f0                GetExposure / SetExposure
+0x000206c0                             GetVersionInfo(sdc::VersionData*)
+0x0001f170 / 0x0001fdf0                Connect / Disconnect
+0x0001f260 / 0x000208c0 / 0x00022080   Continue / Pause / StopSystem, StartSystem at 0x00021970
+```
+
+`[VERIFIED]` these are exported with those signatures. This matters because it says the host
+interface is not limited to the register channel we have been probing: the vendor SDK can issue
+**I2C reads/writes, SPI reads/writes and GPIO writes** against devices inside the headset,
+including the M2450/M2452 imager that royale drives. `[UNKNOWN]` which wire opcode each one
+maps to. The register channel we use is `3d <op> <addr16BE> <data>` with `op` 0x21 (read) and
+0x60 (write); an I2C tunnel would plausibly be a different `op`, and no such `op` has been
+identified in the captured arm.
+
+Royale side, same inventory: `getGrayscaleModulationFrequency@Imager` (RVA `0x00008d37`),
+`verifyModulationSettings` on `ImagerM2450`, `ImagerM2452`, `ImagerM2450_A12_SSC`,
+`ImagerM2452_SSC`, `updateModulationAssigmentLUT`, `generateRawFrame(..., DutyCyle)`,
+`setDutyCycle`, `setRawFrameRate`, `getRawFrameCount`, `getTailTime`, `setUseCase(... , u64)`.
+`[VERIFIED]` as exports.
+
+**`BridgeSAQBase::executeUseCase` is a forwarder, not a transfer builder.** Export RVA
+`0x000126de` thunks to `0x180158f40`. The body calls the virtual at vtable slot `+0x58`, then
+computes `2 * (a * b)` and calls the virtual at vtable slot `+0x50` with
+`(this, 2*size, buffer, 0)`. It builds no control packet itself; the packet is built by the
+derived bridge's vtable (`BridgeImagerSAQ`). `[VERIFIED]` by disassembly. That is why
+`executeUseCase` never appeared as a distinct transfer in the captured arm — the arm only shows
+what the derived bridge emits.
+
+**Next static step, if the Windows run does not settle it:** locate the `BridgeImagerSAQ` vtable
+in `royale.2.3.1.dll` and disassemble the slots at `+0x50` and `+0x58`, which is where the
+actual use-case bytes are formed. That is a bounded job but not a short one.

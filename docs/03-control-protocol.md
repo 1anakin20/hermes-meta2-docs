@@ -307,3 +307,54 @@ example in `docs/06-writing-a-reader.md`.
 **Important negative result:** replaying the sequence gets the device into a state where
 it will produce data, but it does **not** by itself produce a continuous stream. See
 5.5 and 7.1. `[VERIFIED]`
+
+## 3.7 The vendor driver's own command vocabulary
+
+`Meta.Driver.dll` carries the protocol constants as literal fields in
+`Meta.Driver.Core.Meta2CommandConstants` and `Meta.Driver.Core.Meta2DriverConstants`.
+Read directly from the IL (`re/dotnet/Meta.Driver.il`). `[VERIFIED]` as source-of-truth
+for what the vendor driver *defines*; separately noted below for what it actually *uses*.
+
+```
+REQUEST_CODE_BASE              0xB0
+REQUEST_CODE_STD               0xC0     <- the code every transfer in our arm uses
+REQUEST_CODE_USB               0xC1     <- seen live (0xC1/0xFD answered 000106)
+REQUEST_CODE_GEO               0xB9     <- never observed on the wire
+REQUEST_FILE_COMMAND           0xC2     <- never observed as a bRequest in our arm
+
+REQUEST_VALUE_FIRMWARE_VERSION       0x07
+REQUEST_VALUE_FPGA_FIRMWARE_DATE     0x05
+REQUEST_VALUE_GEO_FIRMWARE_VERSION   0x04
+REQUEST_VALUE_USB_FIRMWARE_VERSION   0xFD  <- seen live
+REQUEST_FILE_VALUE                   0x04  <- our device-file reads (wValue 4)
+REQUEST_CONTINUE_FILE_VALUE          0x02
+REQUEST_ENDPOINT_FEED_VALUE          0x06  <- our enable-mask request
+REQUEST_MULTIPLEXOR_FEED_VALUE       0x09  <- our multiplexor request
+MISC_EOF                             0xFF
+
+SINGLE_TRANSFER_LENGTH  0x26 (38)
+TRAILER_LENGTH          0x20 (32)   <- matches the observed 32-byte frame trailer
+HEADER_LENGTH           0x1C (28)
+VENDOR_ID 0x2CFA  PRODUCT_ID 0x00F3
+REQUEST_VENDOR 0x40  DIRECTION_TO_DEVICE 0x00  DIRECTION_FROM_DEVICE 0x80
+```
+
+Two **separate** enable-bit layouts, which is why one mask cannot enable everything:
+
+```
+multiplexor feed (0xC0 / wValue 9, 4 bytes):   IMU0 0x01  IMU1 0x02  MICS 0x04  BUTTONS 0x08
+camera feed      (0xC0 / wValue 6, 6 bytes):   MONO0 0x02 MONO1 0x04 TOF 0x08
+                                               MULTIPLEXOR 0x10  RGB 0x20  STD 0x40
+```
+
+The live arm uses `wValue 6 = 00 04 00 00 00 7E` (MONO0|MONO1|TOF|MULTIPLEXOR|RGB|STD) and
+`wValue 9 = 00 00 00 1B` (IMU0|IMU1|BUTTONS|0x10). `[VERIFIED]` from `data/ctrl_seq_full.json`.
+`0x7E` is exactly "everything on the camera feed", and `0x48` (STD|TOF) is the ToF-only mask
+used in IR-29. `[VERIFIED]`
+
+`REQUEST_CODE_BASE` (0xB0), `REQUEST_CODE_GEO` (0xB9), `REQUEST_FILE_COMMAND` (0xC2) and the
+firmware-version values `0x07`/`0x05`/`0x04` are **defined but never referenced** anywhere in
+`Meta.Driver.il` — the only occurrences are the field definitions themselves. `[VERIFIED]`
+They are therefore unprobed request codes, not known-good ones; treat them as leads, and note
+that unpaired control reads have previously wedged the control channel (see EVIDENCE on the
+IR-46/47 incident).
