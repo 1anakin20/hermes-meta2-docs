@@ -1537,3 +1537,18 @@ from the arm. For this transfer it is not.
 
 What did respond: zeroing the 40-byte `0xc2bc` table moved mean **+5.5 counts** (30× drift), sd
 141 → 147, and EP 0x84 8.98 → 7.10 MB/s. `0xc2bc` is a live parameter, previously unprobed.
+
+## 28. IR-65 — the "we just need to demodulate it ourselves" hypothesis is closed `[VERIFIED]`
+
+Royale's `UseCaseTwoPhase/FourPhase/EightPhase`, `RawFrameSet` and `UseCaseDefinition::getRawFrameCount`
+describe a camera that returns N raw correlation frames per measurement. If EP 0x84 were that stream,
+the constant 2037 would be an artefact of looking at single frames instead of groups.
+
+Tested offline on `re/ir29_tof_ep84.bin` (4,957 resynchronised frames, `re/ir65_multiphase.py`):
+consecutive frames differ by 3.82 counts against a shuffled baseline of 3.99 (**ratio 0.9574**);
+frame-mean autocorrelation peaks at +0.19 with no period-2/4/8 signature; 4-phase demodulation over
+1,239 groups yields amplitude mean 13.14 and a uniform phase distribution; spatial coherence of the
+demodulated amplitude, of brightness, and of a raw frame is **1.0000** in all three cases.
+
+There is no phase sequence in the stream. Withdrawn: any expectation that host-side demodulation of
+existing EP 0x84 captures can recover range.

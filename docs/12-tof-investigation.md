@@ -723,3 +723,138 @@ parameter no probe had touched. Its vendor payload is a table, not a scalar:
 ```
 
 with `0x08d3` recurring. IR-64 sweeps its bytes one at a time.
+
+## 12.21 The depth HAL is PMD's Royale SDK, vendored at version 2.3 `[VERIFIED]`
+
+`royale.2.3.1.dll` is not a Meta invention. The DLL carries its own build paths:
+
+```
+D:\jenkins\workspace\SDK2_Release_2.7.0-PRODUCTION\jupiter\third_party\royale\_libroyale-2.3\
+    source\components\record\src\FileWriter.cpp
+D:\jenkins\workspace\SDK2_Release_2.7.0-PRODUCTION\jupiter\third_party\royale\_libroyale-2.3\
+    source\components\record\src\v2\FileReader.cpp
+```
+
+So Meta's SDK2.7.0 vendors **libroyale 2.3** as a third-party component under the internal project
+name `jupiter`. Independently, `0xB8`'s manifest contains `PMDTEC` / `PMDSCL`, and PMD Technologies
+describes Royale as "a light-weight camera framework for Time-of-Flight (ToF) 3D cameras … tailored to
+pmd 3D cameras". The depth subsystem is a **PMD ToF imager driven by PMD's Royale framework**.
+
+**Version discipline for any external reference.** The public Royale ecosystem (the ROS driver
+`code-iai/pico_flexx_driver`, PMD's current downloads) documents Royale **3.x–5.x**, and its API has
+moved: that driver reads `royale::DepthData::points`, `getStreams`, `royale::StreamId`, filter levels
+and `IExposureListener2`. None of those symbols exist in the 2.3 inventory below. Public Royale
+material is therefore the right *conceptual* reference and the wrong *version* — do not assume a
+public header describes what this device runs. The authoritative inventory for 2.3 is the vendored
+binary itself.
+
+Extracted from the binary (`re/royale_api.txt`, 721 decoded symbols, published as
+`artifacts/royale_api.txt`), the classes that matter:
+
+| layer | symbols |
+|---|---|
+| imager | `royale::imager::ImagerM2450`, `ImagerM2452`, `ImagerM2450_A11/A12_SR/A12_SSC`, `ImagerM2452_A11_SR/SSC`, `ImagerM2452_B1x_SR/SSC`, each with a `_DirectAccess` variant |
+| modulation | `ModPllStrategyM2450_A12::pllSettings`, `ModPllStrategyM2452_A11::pllSettings`, `DphyPllStrategy…::pllSettings` |
+| use case | `UseCaseDefinition::{getRawFrameCount, getRawFrameSets, generateRawFrame, setRawFrameRate, setTargetFrameRate, getTargetFrameRate, getMaxFrameRate, getMinFrameRate, setDutyCycle, setExposureTime(s), getExposureLimits, getTailTime, getImage, getName}`, `UseCaseTwoPhase`, `UseCaseFourPhase`, `UseCaseEightPhase`, `UseCaseGrayScale`, `UseCaseCalibration`, `RawFrameSet::MODFREQ_AUTO` |
+| imager sequencing | `Imager::{prepareModulationSettings, verifyModulationSettings, prepareModulationAssigment, updateModulationAssigmentLUT, verifyPhaseSettings, getGrayscaleModulationFrequency, prepareROI, prepareFrameRateSettings, prepareExposureSettings, initialRegisterConfig, writeImagerRegister, writeImagerBurst, maskedWriteRegister, trackAndWriteRegisters, readImagerRegister, readRegisters, writeRegisters, startCapture, stopCapture, shutDownSequencer, reconfigure, resolveConfiguration}` |
+| M2450/M2452 specifics | `getPhaseMapping`, `getWaveGenEnable`, `preparePsSettings`, `calcRegExposure`, `calcRawFrameRateTime`, `adjustRowCount`, `getReadoutDelays`, `getSerialRegisters`, `downloadInitialConfig`, `loadFirmware` |
+| USB bridge | `BridgeSAQBase::{executeUseCase, writeImagerRegister, writeImagerBurst, writeImagerBurstAtomic, readImagerRegister, readImagerBurst, readImagerBurstAtomic, setImagerReset}` and the same for `BridgeEnclustra` |
+| module config | `royale::config::getModuleConfigSAQ`, `getModuleConfigCX3Uvc`, `getModuleConfigPicoFlexxU6`, `getModuleConfigPicoS`, `initializeUseCases`, `CoreConfigAdapter::{getSupportedUseCases, getImagerConfig, getIlluminationConfig, getImagerType, isAutoExposureSupported}` |
+
+`getModuleConfigSAQ` is the function that defines this headset's camera module — imager type,
+illumination configuration and the list of supported use cases. It is the single most valuable target
+in the whole library, and it is compiled data, not a string table.
+
+## 12.22 The arm is at least five command families, distinguished by `wValue` not by payload `[VERIFIED]`
+
+Census of `ctrl_seq_full.json` (417 transfers: 138 OUT, 279 IN). The `3d` register grammar is only one
+family; the families are separated by **`wValue`**:
+
+| family | shape | count | what it is |
+|---|---|---|---|
+| register access | `wValue=3`, `wIndex=wLength=len(payload)`, payload `3d <op> <addr16> <data>` | 116 OUT | the imager register bus |
+| sensor enable mask | `wValue=6`, `wIndex=6`, payload `00 04 00 00 00 <mask>` | 3 | the `SENSORS_ENABLE` write (`0x40`, `0x7e`, `0x00` observed) |
+| multiplexor mask | `wValue=9`, `wIndex=4`, payload `00 00 00 <mask>` | 2 | `0x1b` and `0x00` observed |
+| device files | `wValue=4 wIndex=8 payload 6877696e666f2e62` ("hwinfo.b"), then `wValue=3` with `wIndex=wLength` of 2336 / 608 / 608 / 608 / 338 and empty OUT, answered by INs of 599 / 329 bytes | 5 | file reads |
+| small bridge commands | `wValue=4 wIndex=2` payload `0c00`, `0d00`, `0c01`, `0d01`; `wValue=5 wIndex=2` payload `0074`; `wValue=3 wIndex=7` payload `6d1302ffffffff`; `wValue=1 wIndex=5` payload `0000030020`; `wValue=7 wIndex=0` and `wValue=0xfd wIndex=0` with zero length | 9 | not register writes |
+
+Register opcodes correlate with payload width, not with command type:
+
+| opcode | OUTs | distinct addrs | data words |
+|---|---|---|---|
+| `0x21` | 70 | 48 | read, mask-shaped |
+| `0x40` | 32 | 22 | 2 words (31 of 32) |
+| `0x60` | 3 | 3 (`a882`, `b00e`, `c2cc`) | 4 or 20 words |
+| `0xa0` | 3 | 3 (`a882`, `a886`, `c2bc`) | 8 or 40 words |
+| `0xc0` | 5 | 4 (`c35e`, `c363`, `c368`, `c36d`) | 10 words |
+| `0xe0` | 1 | 1 (`c352`) | 12 words |
+| `0x20` | 2 | 2 (`b062`, `bff8`) | 16 words |
+
+Consequence: `BridgeSAQBase::writeImagerRegister` / `writeImagerBurst` / `readImagerRegister` map onto
+the `3d` family, but **`BridgeSAQBase::executeUseCase` does not obviously map to any transfer in our
+arm.** The best candidates are the nine small `wValue=4/5/7/1/0xfd` commands — in particular the four
+`0c00 / 0d00 / 0c01 / 0d01` pairs at arm indices 18–27, which sit before any register is touched.
+`BridgeEnclustra` carries the error string *"only supports changing use case when stopped"*, which
+fits a sequencer start/stop family. `[INFERRED]`; not yet resolved.
+
+## 12.23 IR-65 — EP 0x84 is not a raw multi-phase correlation stream `[VERIFIED]`
+
+The cheapest possible way to rescue the depth path was the hypothesis that each EP 0x84 frame is one
+raw correlation frame of an N-frame group, and that amplitude/phase must be computed by the host —
+which is what `UseCaseTwoPhase/FourPhase/EightPhase`, `RawFrameSet` and `getRawFrameCount` describe.
+Tested offline on `re/ir29_tof_ep84.bin` (`re/ir65_multiphase.py`, 4,957 resynchronised frames, no
+device time):
+
+| test | result |
+|---|---|
+| consecutive-frame mean absolute difference | 3.82 counts vs 3.99 shuffled → **ratio 0.9574** |
+| frame-mean autocorrelation, lags 1–16 | max **+0.19**, no period-2/4/8 signature |
+| 4-phase demodulation, 1,239 consecutive groups | amplitude mean **13.14**, phase sd **1.95 rad** (uniform) |
+| spatial coherence of demodulated amplitude | **1.0000** (1.0 = pure noise) |
+| spatial coherence of brightness `B = mean(I0..I3)` | **1.0000** |
+| spatial coherence of a raw frame | **1.0000** |
+
+Consecutive frames are statistically indistinguishable from random frame pairs. There is no phase
+cycle to demodulate. Each EP 0x84 frame carries one already-demodulated 12-bit value per pixel, and
+that value is not a measurement.
+
+## 12.24 IR-66 — the `0xb800–0xb9ff` band is a readable 1024-byte device program `[VERIFIED]`
+
+The vendor driver performs four masked reads that our arm never issued (`re/sdk_outs.tsv` indices
+593/599/605/611): `3d 21 b800`, `3d 21 b880`, `3d 21 b900`, `3d 21 b980`, each with a 256-byte
+`0xff` mask. Replayed as OUT/IN pairs (OUT `wValue=3 wIndex=wLength=260`, IN `wValue=3 wIndex=1
+wLength=257`), **all four returned status `00` and 256 bytes of real data**, and the content was
+byte-identical in both placements that were tried and across repeats.
+
+The band is therefore a 1024-byte block the device *stores and reports*, in the same address range
+the vendor's 920-byte `3d 60 b800` write targets. Its content is not random: it is a dense sequence
+of 16-bit words drawn from a small vocabulary, and it shares literal 8-byte runs with the vendor
+blob (`0218 0890 0442`, `0a0d 03c4 0890 0c43`, `000e 0902` appear in both), 32 aligned 8-byte matches
+between the 916-byte vendor write and the 1024-byte read-back.
+
+```
+read-back 0xb800: 0800 0800 08cc 0e27 0061 00cd 066b 020c 03b0 0890 0c43 0200 0380 05c4 0013 0444 ...
+read-back 0xb880: 0448 0295 0c49 0206 0c4a 02f0 044b 0200 0340 0c4c 0203 044d 02ff 0307 044e 021e ...
+read-back 0xb900: 0008 018b 08cf 0f31 0a01 03c4 0890 0c43 0afe 0bff 05c4 0812 0444 0209 03b0 0c43 ...
+read-back 0xb980: 0c58 052c 0459 0a04 05c7 0013 0447 0a04 0dc9 0013 0c49 0a04 0dcc 0013 0c4c 0a04 ...
+vendor  0xb800 : 08d1 06c1 00d0 0604 00d0 0f0d 0218 0890 0442 0a02 00b0 0c40 0040 0a0d 03c4 0890 ...
+```
+
+The recurring high nibbles (`0x0a…`, `0x0c…`) match the high nibbles of the register-write opcodes in
+the arm (`0x40`, `0x60`, `0xa0`, `0xc0`, `0xe0`, `0x20`), which is consistent with this being an
+**imager register program** — a list of (opcode, register, value) operations the bridge replays —
+rather than a scalar configuration block. `[INFERRED]` The exact record grammar is not yet decoded;
+fixed 4/5/6/7/8-byte strides all fail to make the records self-consistent.
+
+Two things this settles:
+
+1. The device already holds a program in this band **without our arm ever writing it**, and it is
+   identical whether or not we read it. So the band is persistent device state, not something our arm
+   is failing to supply.
+2. The vendor blob and the device's stored program are the same *kind* of object but not the same
+   bytes. IR-63's inert result is now interpretable: writing a program the device already has a
+   variant of does not change what the depth endpoint reports.
+
+Placement caveat observed in the same run: inserting the four reads *before* the enable-mask transfer
+collapsed EP 0x82/0x83 to 0.01/0.03 MB/s, while appending them after the completed arm left EP 0x84 at
+9.8 MB/s. Reads obey the same in-place rule as writes.
