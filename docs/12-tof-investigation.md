@@ -1116,3 +1116,47 @@ as provisional. `[RULE]`
 `check_speed.ps1` (in `re/winpack2`, shipped in `meta2_win_depth_test_v2.zip`) walks the device's
 SetupAPI parent chain — Windows names SuperSpeed root hubs `ROOT_HUB30` — and, given `CyUSB.dll`,
 queries the same `bHighSpeed` / `bSuperSpeed` flags the SDK reads.
+
+## 12.30 The SDK's directory layout comes from `META_ROOT`, not from the exe folder
+
+Observed on the user's physical PC: **"Path to border mask does not exist!"** naming a path under
+`AppData\Roaming` belonging to a Windows account the user is not. `[VERIFIED]`
+
+**Source of the message.** `meta_block_hand_segmentation.dll` and `meta_mcv_hand_segmentation.dll`
+carry the strings `border_mask.png`, `Path to border mask does not exist!. Path: `,
+`Border mask image is empty!`; `meta_mcv_feature_extractors.dll` adds `Incoming Border Mask is empty.`
+This is the **hand tracking** chain (`HandSegmentationBlock1` → `HandTrackingBlock2` in the coco
+graph), not the depth chain. `[VERIFIED]`
+
+**How the path is built.** In `.rdata` the strings sit in one attribute group:
+`frame_data_IN`, `color_IN`, `frame_data_OUT`, `add_color_info`, `min_no_of_fingers`, **`data`**,
+**`border_mask.png`**. The block joins its `data` attribute with `border_mask.png` using
+`meta::fou::os::JoinPaths` / `fou::os::DirSep`, both exported by the same DLL. `[VERIFIED]`
+
+**Where `data` comes from.** `meta_foundation.dll` `.rdata` contains `META_ROOT` immediately followed
+by the internal-path table: `META_INTERNAL_CACHE`, `/bin`, `META_SDK2`, `META_INTERNAL_CACHE_DEBUG`,
+`META_INTERNAL_USB`, `META_INTERNAL_TESTING_DATA` → `/testing_data`, `META_INTERNAL_DRIVER`,
+`META_INTERNAL_INSTALL`, `META_INTERNAL_APP_DATA` → `/app_data`, `META_INTERNAL_BUILD`,
+`META_INTERNAL_CORE`, `META_INTERNAL_RECORDING` → `/recording`, `META_INTERNAL_CONFIG` → `/config`,
+`META_INTERNAL_TOOLS`, `META_INTERNAL_3RDPARTY`, `META_INTERNAL_SERVER`. `[VERIFIED]`
+
+`Meta.WorkEnvironment.dll` is the resolver: it exposes `get_RootPath`, `get_SDKPath`, `get_ConfigPath`,
+`get_LogPath`, `BuildLogPath`, `EnsureLogPath`, `AddFolderToPath`, `AddFolderToPathIfNotExist`,
+`IAppDataPath`, `IsInsidePath`, and uses `Environment.GetEnvironmentVariable` /
+`SetEnvironmentVariable` with `EnvironmentVariableTarget`, over `META_ROOT`, `META_SDK2`,
+`META_CONFIG`, `META_INTERNAL_VAR`. The log4net configs confirm the mechanism literally:
+`<file value="${META_ROOT}\Logs\Meta.SimpleDiagnostics\Meta.SimpleDiagnostics.txt" />`. `[VERIFIED]`
+
+**Consequence.** Because these are environment variables with a target scope, a machine-scope
+`META_ROOT` written by the installer while running as one account is inherited verbatim by every
+other account that later runs any SDK app — which is how a second account sees a path inside the
+first account's profile. `[INFERRED]` from the above; consistent with the observation.
+
+**`border_mask.png` is not shipped.** A full search of the extracted SDK finds no such file — only
+the strings inside the hand-segmentation DLLs and a `textures/border_mask` asset inside the
+`Apps/Eye Alignment` Unity build. So the warning appears regardless of `META_ROOT` correctness and is
+irrelevant to `DeviceStreamBlock`, the depth path, or the point cloud. `[VERIFIED]`
+
+`check_env.ps1` (in `re/winpack2`) prints every `META_*` variable at Process, User and Machine scope,
+flags any pointing into a different user's profile, and reports the owning account of running Meta
+processes.
