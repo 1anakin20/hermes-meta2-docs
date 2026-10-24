@@ -150,3 +150,44 @@ Honest caveats on method 2:
    mono intrinsics to a pinhole model.
 4. Map wire tags to calibration blocks explicitly: `0x44 → mono_left`, `0x55 → mono_right`.
 5. Treat the file index order as unrelated to wire order.
+
+## 11.7 Depth camera intrinsics (from this unit's `calibration.bin`)
+
+`re/e1_calibration.bin.txt` is the device's own `calibration.bin` read over the vendor
+file path, and it is the rig XML. The `depth` block is the ToF camera:
+
+```xml
+<camera_model index="0" name="depth" type="calibu_fu_fv_u0_v0_k1_k2_k3">
+  <width> 352 </width>
+  <height> 287 </height>
+  <right> [ 1; 0; 0 ] </right>
+  <down>  [ 0; 1; 0 ] </down>
+  <forward>[ 0; 0; 1 ] </forward>
+  <params> [ 151.9015; 151.8631; 177.1966; 142.2995;
+             0.1575959; -0.1942623; 0.04948911 ] </params>
+</camera_model>
+<pose><T_wc> [ 1,0,0,0; 0,1,0,0; 0,0,1,0 ] </T_wc></pose>
+```
+
+`fu 151.9015`, `fv 151.8631`, `u0 177.1966`, `v0 142.2995`, radial `k1 k2 k3`
+= `0.1575959, -0.1942623, 0.04948911`. `[VERIFIED]` read from the device.
+
+Two consequences:
+
+1. **Height 287 confirms the row-0 sentinel independently.** The wire frame is
+   352×288 (`0xa886` read-back and `TimeOfFlight16Image(352, 288)`), the calibrated
+   image is 352×**287**. The extra row is the sentinel row, not a calibration error.
+   `[VERIFIED]` by two independent sources.
+2. The depth camera is the **rig reference frame** (`T_wc` is identity). Mono and RGB
+   poses are given relative to it, so a depth pixel back-projects directly into rig
+   coordinates with no extra transform.
+
+Back-projection once values are interpretable:
+
+```
+x = (u - u0) / fu ; y = (v - v0) / fv ; ray = (x, y, 1) / ||(x, y, 1)||
+point = depth_value * ray            # already in rig frame
+```
+
+Horizontal FOV implied by `fu 151.9` at 352 px: 2·atan(176/151.9) ≈ **98.4°**.
+Vertical: 2·atan(143.5/151.86) ≈ **87.0°**. Both `[INFERRED]` from the intrinsics alone.
