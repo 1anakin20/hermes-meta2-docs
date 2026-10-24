@@ -1022,3 +1022,56 @@ what the derived bridge emits.
 **Next static step, if the Windows run does not settle it:** locate the `BridgeImagerSAQ` vtable
 in `royale.2.3.1.dll` and disassemble the slots at `+0x50` and `+0x58`, which is where the
 actual use-case bytes are formed. That is a bounded job but not a short one.
+
+## 12.28 IR-70 — the vendor SDK on a physical Windows PC: the fixed shell is gone
+
+The user ran the v1 probe (`MetaDepth.exe`, `re/winpack`) on a physical Windows PC with the
+headset attached directly. Output archive extracted to `re/ir70_win/output/`
+(published copies in `artifacts/ir70_win/`). 637 polls over ~118 s. `[VERIFIED]`
+
+**The device came up properly.** `meta_get_device_status` walked `dev 2 → 3 → 1 → 4` and
+settled at `dev=4 conn=1` for 531 of 637 polls. `[VERIFIED]`
+
+**Tracking engaged, which never happened in the VM.** `meta_get_tracking_status` returned
+`(state=1, reason=3)` for 559 of 637 polls. In every VM run of the same probe it returned
+`(0, 0)` for the entire run. `[VERIFIED]` difference.
+
+**Pose became live.** `meta_get_point_cloud` returned 559 distinct translation triples and
+560 distinct quaternions across the run. In the VM the pose was static. `[VERIFIED]` difference.
+
+**The stream mask differs from the VM.** Observed: `0xFBF` (270 polls), `0xF8F` (241),
+`0xFFF` (6), `0xFCF` (4), and `0x0000` for 106 polls during bring-up. The VM steady state was
+`0xFCF` throughout. `[VERIFIED]` difference. `[UNKNOWN]` which stream the differing bits name;
+the mask bits have not been mapped to a published enum.
+
+**The 2.4465 m shell did not reproduce.** 6 of 637 polls produced non-zero points, 31 real
+points in total, with `max_r` values `0.858, 0.908, 0.926, 0.975, 1.103, 2.176` m. All points
+fell in the 0.3–1 m bin (22 points) or the 1–3 m bin (9 points); zero points above 3 m. The
+IR-55b pinned maximum of `2.4876 m` was never reached — the observed maximum was `2.176 m`.
+`[VERIFIED]`
+
+`meta_get_reconstruction_mesh` still returned 0 vertices and 0 triangles for all 637 polls.
+`[VERIFIED]`
+
+**What this settles.** The fixed-radius shell reported in §12.15 and §12.16 was a property of
+the VM configuration, not of the device pipeline. On real hardware the SDK produces sparse but
+variable-radius points together with live tracking and live pose. That is what a depth path
+looks like when it is running and only partly converging. `[INFERRED]` from the above, strong.
+
+**What this run could not answer.** Three probe defects cost us the decisive half of the data:
+
+1. The v1 probe read its phase from `C:\MetaReader\phase.txt`, which was never written on the
+   physical PC. `phases.csv` is empty, so no radius can be attributed to a specific scene.
+2. v1 gated RGB capture on stream bit `0x40`, which is clear in `0xFBF` and `0xF8F`. No RGB
+   reference frames were captured.
+3. v1 dumped spike clouds only at `nz >= 200`. The run peaked at `nz = 19`, so the 31 real
+   points were never written out individually.
+
+**IR-71 probe (`re/winpack2`, shipped as `meta2_win_depth_test_v2.zip`)** fixes all three:
+operator-keyed phases, unconditional RGB attempts every 5 s, per-point logging of every
+non-zero point into `points.csv`, and a health watchdog that aborts a run 20 s after the
+device leaves `dev=4 conn=1 streams!=0` so a dead run cannot waste time. A companion
+`Preflight.exe` checks DLL placement, the VC++ runtime, presence of a device interface under
+class GUID `{bb0697e3-404c-42be-8de0-85710015bd26}` (the same enumeration `cyapi.dll` performs),
+`meta_start`, bring-up to the healthy state, and every P/Invoke signature the probe uses,
+before any run starts.

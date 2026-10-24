@@ -1574,3 +1574,24 @@ control drift. The `0xb800–0xb9ff` program band is not the missing measuring s
 New operational rule: **to verify that a write took effect, read inside the same scripted window, at
 the position the vendor's own sequence uses.** Reading at the end of the arm reports pre-write state.
 Artifacts: `artifacts/ir67_band_write.json`, `artifacts/ir68_band_vendor_order.json`.
+
+## 30. IR-70: the fixed 2.4465 m depth shell was a VM artifact
+
+Withdrawn: any claim that the vendor SDK's point cloud is *inherently* a fixed-radius shell. That
+behaviour was observed only in the Windows VM.
+
+On a physical Windows PC with the headset directly attached, the same probe produced
+`dev=4 conn=1` for 531/637 polls, `meta_get_tracking_status = (1, 3)` for 559/637 polls (the VM gave
+`(0, 0)` for the whole run), 559 distinct pose translations, a steady stream mask of `0xFBF`/`0xF8F`
+(the VM gave `0xFCF`), and 31 real point-cloud points with `max_r` values `0.858, 0.908, 0.926,
+0.975, 1.103, 2.176` m — all inside 0.3–3 m, none above 3 m, and the VM's pinned `2.4876 m` maximum
+never reached. `[VERIFIED]`
+
+What still holds: `meta_get_reconstruction_mesh` returned 0 vertices in both environments, and the
+point cloud is sparse (6 of 637 polls non-zero). `[VERIFIED]`
+
+Methodological warning this exposes: **a VM result about SDK-level outputs is not a device result.**
+Device bring-up, tracking, stream masks and depth convergence all differed between the VM and real
+hardware for the same SDK build and the same probe. VM evidence is usable for the wire protocol and
+for driver behaviour; it is not usable for characterising what the SDK computes.
+Artifacts: `artifacts/ir70_win/`.
