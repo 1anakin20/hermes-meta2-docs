@@ -405,3 +405,47 @@ headset.
 (`docs/EVIDENCE.md` §17.1). It answers `00 00 idx hi lo` with a 33-byte window, carries `PMDTEC`,
 `PMDSCL` and a `22.09.2017` build stamp for index 0..7, and is a plausible route to the PMD module
 manifest — but its index-to-window mapping is not yet understood.
+
+## 12.14 EP 0x84 frame layout, and the fact that it does not see the scene
+
+Two things a library needs from this endpoint, both now measured. Full detail in
+`docs/EVIDENCE.md` §18.
+
+**The frame.** Each frame is a 32-byte descriptor block followed by 101,376 samples of body —
+101,392 samples, 202,784 bytes, and 101,376 = 352 × 288. The descriptor block is identified by six
+magic values at fixed slots:
+
+```
+slot  0  0xDEAD    slot  6  0x0004
+slot  1  0xF00D    slot  7  0x0244 (580)   in 335/605 blocks
+slot  2  0xDADD    slot  8  0x0000         in 335/605 blocks
+slot  3  0x0000    slot  9  0x0120 (288)   in 198/605 blocks
+slot  4  0x0000    slot 10  0x00C6 (198)   in  73/605 blocks
+slot  5  varies    slot 11  0xABBA / 0x0000
+slot 12  0xFEED / 0x0FFF
+slot 13  0x0022 / 0x0FFF
+slot 14  0x0022 / 0x0FFF
+slot 15  0xBEEF / 0x0FFF
+```
+
+Blocks arrive in runs (1..9 blocks back to back). In 130 of 269 inter-run gaps the distance from the
+end of one run to the start of the next is exactly 101,392 samples. The other 139 gaps are partial —
+61,376 / 57,280 / 60,176 / 64,368 samples and so on — because transfers are being lost, the
+slice-and-tear problem in `docs/05`. A parser must therefore resynchronise on `0xDEAD` rather than
+trust a fixed stride.
+
+**The body does not respond to the scene.** Seven physical conditions, 60 s each, operator-coached:
+baseline, palm over the front, opaque cloth, wall at 15 cm, wall across the room, floor directly
+below, and a repeat baseline. Every mean fell within 0.23 counts of the pooled no-scene reference
+(2037.397, sd 0.313), and the two *identical* conditions differed from each other by 0.163 counts at
+t = 2.95 — larger than four of the five scene conditions. Median per-second quartiles were
+2007 / 2030 / 2052 in every second of every condition.
+
+`[VERIFIED]` It is also not a fixed pattern: 0 duplicated transfers in 697, and transfer-to-transfer
+byte identity is flat at 30.1% across every lag, which is exactly what a constant high byte plus a
+varying low byte produces.
+
+So the body is well-formed, correctly framed, internally structured, and blind. `[INFERRED]` that
+the ToF illumination is not running under the host-only arm. `[UNKNOWN]` which register switches it
+on — `0xa882` and `0xa886` are the strongest candidates because perturbing either one silences the
+endpoint entirely, but silencing is not the same as being the illumination enable.

@@ -874,3 +874,114 @@ Artifacts, local to the working tree: `ir38_mask_maps.json`, `ir40_b8_table.json
 `ir38_mask_maps.py`, `ir39_b8_enum.py`, `ir40_b8_table.py`, `ir42_b8_sweep.py`,
 `ir43_b8_cursor.py`, `ir44_ep81_imu.py`, `ir45_ablation.py`, `ir46_b00e_sweep.py`,
 `ir47_b00e_inplace.py`, `ir48_b00e_full_sweep.py`, `ir49_moments.py`.
+
+## 18. IR-51 to IR-53 — the depth output does not respond to the scene, and the frame layout becomes readable (2026-10-23)
+
+### 18.1 IR-51 — seven physical conditions, coached through a web page
+
+`scene_coach.py` (served on `:8095`) drives an operator through a protocol: it shows the condition,
+waits for an explicit "I'm ready" click with no timeout, counts down 5 s of prep, runs a 60 s capture
+with live per-second statistics on screen, then shows the result before advancing. Every second is
+appended to `ir51_scene.jsonl` with its condition label.
+
+| condition | mean | Δ vs no-scene reference | t |
+|---|---|---|---|
+| `baseline_room` | 2037.32 | — | — |
+| `front_covered_hand` | 2037.37 | −0.026 | −0.59 |
+| `front_covered_opaque` | 2037.35 | −0.044 | −0.94 |
+| `wall_close` (~15 cm) | 2037.35 | −0.045 | −0.92 |
+| `wall_far` (>3 m) | 2037.46 | +0.059 | +1.29 |
+| `floor_down` (~15 cm) | 2037.55 | +0.153 | +3.21 |
+| `control_repeat` | 2037.48 | +0.163 | +2.95 |
+
+`[VERIFIED]` The reference is the two *identical* conditions pooled (n = 120, mean 2037.397,
+sd 0.313). The drift between `baseline_room` and `control_repeat` is **+0.163 counts at t = 2.95** —
+larger than four of the five scene conditions. The largest scene effect, `floor_down`, is +0.153
+counts, which is **0.0037% of the 4096-count full scale** and is not distinguishable from that
+drift.
+
+A one-way ANOVA over the seven conditions returns F(6, 413) = 5.16, which is nominally significant
+only because n = 420 makes a 0.2-count offset detectable. It is not evidence of a scene effect: the
+no-scene control pair shows the same magnitude.
+
+`[VERIFIED]` Distribution *shape* is also unchanged: the median per-second quartiles are
+**2007 / 2030 / 2052 in every second of every condition**, and per-second sd stays in 131–148
+throughout.
+
+`[CONCLUSION]` With the vendor arm as written, EP `0x84` emits a distribution that does not depend
+on what the headset is looking at. Occluding the front, a wall at 15 cm, a wall across the room and
+the floor directly below are all indistinguishable.
+
+### 18.2 IR-52 — it is not a fixed repeating pattern either
+
+3 s of EP `0x84`, 697 transfers, all 65,536 bytes.
+
+`[VERIFIED]` **0 exactly duplicated transfers.** Consecutive transfers match byte-for-byte on
+30.1% of positions at every lag tested (1, 2, 3, 5, 10, 20) — flat in k, which is what the value
+distribution predicts: 12-bit little-endian samples in bands 7 and 8 have a constant high byte
+(`0x07` / `0x08`) and a varying low byte, giving ≈ 0.5·0.58 + 0.5·small ≈ 30%. A repeating frame
+would show a lag-dependent peak; there is none.
+
+`[VERIFIED]` Sample autocorrelation does show a harmonic series — 16, 32, 48, 64 samples with
+r = 0.71, 0.62, 0.54, 0.45 — but that is produced by large-valued magic markers, not by the samples.
+
+Correction to the first reading of this data: two of the marker values were mis-decoded as
+`0xBECF` and `0xDA7D`. The actual values are **`0xBEEF` (48879) and `0xDADD` (56029)**.
+
+### 18.3 IR-53 — the descriptor block and the frame geometry
+
+3 s of EP `0x84` alone, 41,877,504 bytes = 20,938,752 samples.
+
+`[VERIFIED]` Six 16-bit magic values, each occurring exactly 605 times:
+`0xDEAD`, `0xF00D`, `0xDADD`, `0xABBA`, `0xFEED`, `0xBEEF`. They are not scattered — they sit at
+fixed offsets inside a **16-sample (32-byte) descriptor block**:
+
+| slot | value | note |
+|---|---|---|
+| 0 | `0xDEAD` | block start, constant in 605/605 |
+| 1 | `0xF00D` | constant in 605/605 |
+| 2 | `0xDADD` | constant in 605/605 |
+| 3, 4 | `0x0000` | constant in 605/605 |
+| 5 | varies (`0xEA2D`…) | looks like a sequence counter |
+| 6 | `0x0004` | constant in 605/605 |
+| 7 | `0x0244` (580) in 335 | |
+| 8 | `0x0000` in 335, else varies | |
+| 9 | `0x0120` (**288**) in 198 | matches the calibration height |
+| 10 | `0x00C6` (198) in 73, else varies | |
+| 11 | `0xABBA` in 335, `0x0000` in 204 | |
+| 12 | `0xFEED` in 335, `0x0FFF` in 204 | |
+| 13 | `0x0022` (34) in 335, `0x0FFF` in 204 | |
+| 14 | `0x0022` (34) in 335, `0x0FFF` in 204 | |
+| 15 | `0xBEEF` in 335, `0x0FFF` in 204 | |
+
+`[VERIFIED]` There are two block variants: 335 blocks carry the full `ABBA / FEED / 0x0022 / 0x0022 /
+BEEF` tail, 204 carry `0x0000 / 0x0FFF` in those slots.
+
+`[VERIFIED]` Blocks arrive in runs — 270 runs in 3 s, lengths 1 (210 runs), 7, 4, 8, 9, 5, 6. The
+gap from the end of one run to the start of the next is **101,392 samples in 130 of 269 cases**, and
+101,392 = 352 × 288 + 16. Two runs show a following data span of exactly **101,376 samples = 352 ×
+288**.
+
+`[INFERRED]` A frame is one descriptor block followed by 101,376 samples of body: 101,392 samples,
+202,784 bytes. Runs of several blocks are a table of pending descriptors.
+
+`[VERIFIED]` The remaining 139 gaps are partial — 61,376 / 57,280 / 60,176 / 60,524 / 62,320 /
+64,368 samples and so on — which is the slice-and-tear problem already recorded in `docs/05`:
+transfers are being lost, so not every frame arrives whole.
+
+`[UNKNOWN]` what slots 5, 7, 8, 10 mean, and why two block variants exist. Slot 9 holding 288 is
+consistent with a height field but has not been confirmed against a second geometry.
+
+### 18.4 What this means for the proof of concept
+
+The camera path (`0x83`) produces real images. The depth path (`0x84`) produces a well-formed,
+correctly framed 352 × 288 body whose values do not change with the scene, whose mode is selected by
+`0xb00e`, whose offset is moved by `0xa88f`, and which requires `0xa882` and `0xa886` to emit
+anything at all. The most consistent reading is that the ToF illumination is not running under the
+host-only arm, so the correlation body is a fixed internal pattern rather than measured light. That
+is `[INFERRED]`, not established: no register found so far has been shown to switch illumination on.
+
+Artifacts, local to the working tree: `scene_coach_results.json`, `ir51_scene.jsonl`,
+`ir52_frame_repetition.json`, `ir52_ep84_raw.bin`, `ir53_frame_layout.json`,
+`ir53_ep84_raw.bin`, and the scripts `scene_coach.py`, `ir51_scene.py`,
+`ir52_frame_repetition.py`, `ir53_frame_layout.py`.
