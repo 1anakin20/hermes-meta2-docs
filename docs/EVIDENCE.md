@@ -985,3 +985,52 @@ Artifacts, local to the working tree: `scene_coach_results.json`, `ir51_scene.js
 `ir52_frame_repetition.json`, `ir52_ep84_raw.bin`, `ir53_frame_layout.json`,
 `ir53_ep84_raw.bin`, and the scripts `scene_coach.py`, `ir51_scene.py`,
 `ir52_frame_repetition.py`, `ir53_frame_layout.py`.
+
+## 19. usbmon does not record bulk payload bytes on this host `[VERIFIED]`
+
+`re/control_usbmon.pcap` (6,037,805 B, 75,033 packets, snaplen 245824) was captured on
+`usbmon4` while our own host-side reader ran for 10 s and **measurably** received:
+
+| EP | bytes in 10 s | URBs |
+|---|---|---|
+| `0x81` | 644,864 | 2,519 |
+| `0x82` | 867,893,248 | 13,243 |
+| `0x83` | 550,764,544 | 8,404 |
+| `0x84` | 607,256,576 | 9,266 |
+
+In the resulting pcap, the number of frames carrying a `data_fragment` longer than 100
+bytes is **0**. Bulk completions are present; their payloads are not.
+
+Consequences:
+
+1. **Withdrawn:** any inference that the vendor SDK "received nothing" on EP `0x82`/`0x83`/`0x84`
+   because `meta2_trace.pcapng` shows zero-length bulk completions. That is a capture artifact.
+   `[WITHDRAWN]`
+2. **Method rule:** usbmon may be used for **control transfers only** (setup payloads and
+   `data_fragment` on `bmRequestType` frames are recorded faithfully — 138/138 vendor OUTs
+   recovered from `meta2_trace.pcapng`). It may **never** be used to measure bulk throughput
+   or bulk content. Bulk data must be read by an active libusb client on the host.
+3. Any future experiment that needs the SDK's own bulk data must read it **inside the guest**
+   (SDK API), not from a host-side capture.
+
+## 20. SDK arm vs our arm: the full diff `[VERIFIED]`
+
+Mining `meta2_trace.pcapng` for `usb.bmRequestType==0x40 && usb.src==host` yields **138 vendor
+OUTs across a 47 s SDK session**, and **zero vendor control transfers during streaming**. Two
+arm sequences appear: frames 185–971 (session start) and frames 146436–147829 (immediately
+before teardown, ending with the `000400000000` / `00000000` deassert pair).
+
+Set-difference against our 134-transfer `ctrl_seq_full.json` arm is exactly five transfers, all
+adjacent at arm position 68:
+
+```
+3d 60 b800 + 916 data bytes     (920-byte write, wValue 3, wIndex = wLength = 920)
+3d 21 b800 + 256 x 0xFF         (wide read, paired 257-byte vendor IN)
+3d 21 b880 + 256 x 0xFF
+3d 21 b900 + 256 x 0xFF
+3d 21 b980 + 256 x 0xFF
+```
+
+The `0xb800` blob write was already tested in IR-6 and produced no change in readable bytes and
+no change on EP `0x84` (§12). **No hidden illumination or modulation command distinguishes the
+SDK's configuration from ours.** `[VERIFIED]`
