@@ -511,3 +511,51 @@ range image.
 `illum_idle.py`) was non-blinded and is reported only as supporting evidence. The blinded
 design is the one that carries the conclusion. A unit bug in `illum_blind.py` printed
 `bytes / 1e6` over the whole 14 s window as `mb_s`; the table above is corrected to true MB/s.
+
+## 12.16 Attacking the registers instead of the scene: IR-56, IR-57, IR-58
+
+The scene test (§12.14) and the illumination test (§12.15) removed two candidate explanations for
+why the depth body does not see the room. What is left is the configuration itself: the depth path
+is armed by a band of writes in `0xa880`–`0xa893` plus the `0xb00e` table, and we have never
+established what any of them *mean*. IR-56, IR-57 and IR-58 probe those registers directly, with no
+physical task and no scene dependence. Full data and tables: `EVIDENCE.md` §22.
+
+**`0xb00e` is a structured table, not a repeated mode byte.** Perturbing one byte at a time moves
+the output at 10 of 20 positions, against a control drift of 0.28 counts. Sensitivity grows by a
+factor of ~3–4 per 2-byte slot across slots 0–5 (Δmean 1.29, 4.27, 15.93, 37.86, 150.17, 1438.78)
+and then collapses to under 1.2 counts for slots 6–9. The high-byte/low-byte effect ratio is
+~1.6–2.3 rather than ~255, so the table is not ten independent linear 16-bit knobs. The three
+positions the vendor sets away from `0x15` (12, 15, 18) are precisely the insensitive ones.
+
+**`0xa886` is the first register in the band with a readable meaning.** Its data is four big-endian
+`u16` values: `0, 351, 1, 288` — a window spanning x 0…351 and y **1**…288. The wire frame is
+352×288 and the calibrated image is 352×287, so the row-0 sentinel is a configured exclusion, not
+an artifact. Corroborating byte sensitivity: destroying the low byte of either x bound (byte 1, or
+byte 3 which turns 351 into 350) silences EP 0x84 entirely, while destroying the high bytes of the
+y bounds produces the same broken-but-populated output in both cases (mean 2092.30 / 2094.27,
+sd 369.7 / 369.3, sentinel 3.093% in both).
+
+**`0xa882` carries a live parameter in its 4-byte write.** `op 0x60` is `02 80 10 57`; flipping one
+bit of the last byte (`57` → `56`) moves the mean by −49.9 counts, **narrows** the support from 564
+distinct sample values to 237, and **raises** the endpoint rate from 9.55 to 14.04 MB/s. Narrowing
+while speeding up is not a failure mode. This is the strongest remaining candidate for a genuine
+integration or modulation parameter, and it is the natural next thing to sweep.
+
+By contrast, in the 8-byte `op 0xa0` form of the same register the first five bytes are inert, byte
+5 breaks framing, byte 6 triples the distinct-value count without changing mean or sd, and byte 7
+makes the output **bimodal** (mean 3046.54, sd 1592.79, quartiles 1/2029/4022/4060/4095) — mass
+piled at both the floor and the invalid ceiling.
+
+**`0xa88f` is a stepped selector, not a bias.** IR-50's "+391 counts, rigidly" looked additive. A
+13-point sweep rejects linearity: `mean = 0.258 × value + 1972.8`, R² = 0.685, worst residual +194
+counts. The real structure is discrete levels (~2022, ~2037, ~2089, ~2431, ~2476) selected such
+that the high byte has a single threshold between 3 and 4 and is otherwise ignored, while the low
+byte acts non-monotonically. 0x00ff and 0x0100 differ by one count and produce outputs 67 counts
+apart.
+
+**What this does not yet buy us.** None of these runs tested whether a register setting makes the
+depth body scene-responsive; they tested whether registers affect the output at all. They do,
+strongly, and none of them behaves linearly — which weakens the model "output = f(scene) + register
+offsets" and points instead at a device whose depth body is assembled from discrete configuration
+levels. The next decisive step is to sweep `0xa882 op 0x60` byte 3 and `0xb00e` slot 5 finely and
+look for a setting where the distribution becomes scene-dependent, rather than merely shifted.
