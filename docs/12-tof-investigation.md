@@ -594,3 +594,68 @@ register setting found so far puts the device into a state where the reported va
 room. The remaining unknown is the configuration that enables measuring, and the vendor SDK is the
 only known producer of that state. The next decisive experiment is SDK-side: read the depth the SDK
 itself reports and test whether it responds to the scene.
+
+### 12.18 The SDK-side depth test is negative: the SDK's point cloud is a fixed 2.45 m shell
+
+That experiment ran as IR-55 and its follow-up IR-55b. Both used `reader/MetaDepth.cs` inside the
+Windows VM: `meta_start()`, `meta_start_reconstruction()`, `meta_reset_reconstruction()` at each
+phase boundary, then `meta_get_point_cloud` (101,024 slots = 352 × 288, metres) polled every ~100 ms,
+plus `meta_get_reconstruction_mesh`, `meta_get_tracking_status` and `meta_get_rgb_frame` as a camera
+control. Phases were pushed to the guest and every one was click-gated by a coach page.
+
+**IR-55 — five conditions, 60 s each.**
+
+| phase | polls with points | max points | distance bins |
+|---|---|---|---|
+| `init_motion` | 92 / 782 | 8 | 1–3 m |
+| `wall_close` (~30 cm) | 0 / 772 | 0 | — |
+| `wall_far` (~2 m) | 33 / 790 | 3,132 | 1–3 m |
+| `cameras_covered` | 26 / 609 | 17,395 | 1–3 m |
+| `wall_close_repeat` | 0 / 494 | 0 | — |
+
+`meta_get_reconstruction_mesh` returned **0 vertices** and `meta_get_tracking_status` returned
+**0/0** in all 3,881 polls. Every non-zero point fell in the 1–3 m bin; **no point was ever in the
+0.3–1 m bin**; the maximum radius was pinned at **2.487–2.488 m** in every burst.
+
+**IR-55b — range map, 45 s each, same wall, with spike-triggered coordinate dumps.**
+
+| phase | polls with points | max points |
+|---|---|---|
+| `wall_2m` | 0 / 418 | 0 |
+| `wall_1m` | 0 / 416 | 0 |
+| `wall_05m` | 0 / 587 | 0 |
+| `wall_03m` | 4 / 587 | 3,864 |
+| `cover_03m` | 113 / 374 | 1,167 |
+
+The 30 spike dumps contain 13,412 points at radius ≥ 0.1 m and 5,311 points at radius < 0.1 m. The
+far points form **one thin shell**: pooled mean radius **2.4465 m**, per-spike standard deviation
+**0.021–0.027 m**, hard maximum **2.4876 m** — identical in every spike, including the spike taken
+while the wall was **30 cm** away. The shell radius does not move when the wall moves.
+
+So the SDK's point cloud is not measured depth. It is a fixed-radius artifact at ~2.45 m whose
+*presence* is intermittent and whose *radius* is a constant of the pipeline — the same 2.488 m ceiling
+that bounded IR-55.
+
+**Camera control confirms the SDK link is live.** `meta_get_rgb_frame` produced real images in every
+phase: room, out-of-focus close wall, room at distance, near-total black when covered. The failure is
+specific to the depth/reconstruction output, not to the device link.
+
+**Two caveats, stated explicitly.**
+
+1. In both runs the SDK's stream mask was `0xFCF`: IMU ×4, RGB, PCLOUD, DEPTH, IR, NOISE, CONF active
+   and **MONO0/MONO1 absent**. The point cloud is a reconstruction product, and the SDK was running
+   with no mono camera input. That the SDK never localized (`track=0/0`, 0 mesh vertices) is consistent
+   with that. What is *established* is that the depth output it does produce is a fixed 2.45 m shell;
+   what is *not* established is that the SDK is incapable of metric depth when its mono path is
+   running.
+2. IR-55's `wall_close_repeat` control is compromised: its RGB frames came back dark (mean 26.8
+   against 85.8 for `wall_close`), so the cloth was probably still covering the headset. And burst
+   *presence* did not reproduce between runs — IR-55 had bursts at 2 m and covered with none at 30 cm,
+   IR-55b had none at 2 m / 1 m / 50 cm and bursts at 30 cm and covered. Burst presence is not a
+   reliable signal; the shell radius is.
+
+**Next decisive experiment (IR-62).** Get MONO0/MONO1 into the SDK's stream mask and repeat the range
+map. If the point cloud becomes a surface at the true wall distance, the missing ingredient is the
+mono/VSLAM path and it is reachable through the SDK; if it stays a 2.45 m shell with mono running,
+then this unit's ranging path is not producing metric depth even under the vendor stack, and the
+host-side route has nothing left to copy.

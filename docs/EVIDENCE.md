@@ -1498,3 +1498,28 @@ that state is the vendor SDK (§12.1, §12.15). The decisive test is therefore t
 the depth the SDK itself reports and establish whether *it* responds to the scene. If it does, the
 missing configuration is findable by diffing behaviour; if it does not, this unit's ranging path may
 not be reachable from USB at all.
+
+## 26. SDK-side depth verdict — the SDK's point cloud is a fixed 2.45 m shell `[VERIFIED]`
+
+IR-55 and IR-55b ran `MetaDepth.exe` against `meta_core_api.dll` in the VM and read the depth the SDK
+itself reports. Result: it does not respond to the scene either.
+
+- `meta_get_point_cloud` (101,024 slots = 352 × 288) is zero almost everywhere. Non-zero points appear
+  only in short bursts whose *presence* is not reproducible between runs.
+- Where points exist, they lie on **one thin shell at radius 2.4465 m** (13,412 points, per-spike
+  standard deviation 0.021–0.027 m, hard maximum **2.4876 m**), plus a cluster at radius < 0.1 m.
+- The shell radius is the same when the wall is at 2 m, 1 m, 50 cm, 30 cm and when the front is
+  covered. In IR-55b the wall at 2 m, 1 m and 50 cm produced **no points at all**, and the 30 cm and
+  covered conditions produced the points — all of them at 2.45 m.
+- `meta_get_reconstruction_mesh` = 0 vertices and `meta_get_tracking_status` = 0/0 in all 3,881 polls
+  of IR-55.
+- The SDK's camera path is confirmed live in the same runs: `meta_get_rgb_frame` returned real images
+  matching each condition.
+
+Withdrawn / bounded: any reading of these point clouds as measured distance. They are a fixed-radius
+pipeline artifact.
+
+Open boundary, stated rather than papered over: the SDK ran with stream mask `0xFCF`, which excludes
+MONO0/MONO1, and the point cloud is a reconstruction product. So "the SDK's depth output is a fixed
+shell" is verified; "the SDK cannot produce metric depth" is not, because its mono input was never
+running. IR-62 (mono streams enabled, same range map) is the experiment that closes it.
