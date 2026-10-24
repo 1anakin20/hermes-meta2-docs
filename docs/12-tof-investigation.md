@@ -1075,3 +1075,44 @@ device leaves `dev=4 conn=1 streams!=0` so a dead run cannot waste time. A compa
 class GUID `{bb0697e3-404c-42be-8de0-85710015bd26}` (the same enumeration `cyapi.dll` performs),
 `meta_start`, bring-up to the healthy state, and every P/Invoke signature the probe uses,
 before any run starts.
+
+## 12.29 The SDK has an explicit SuperSpeed gate — and the physical PC reports USB 2.0
+
+The user's official diagnostics app reports the headset as connected to a USB 2.0 port on a port
+physically wired as USB 3.0. That is not a cosmetic message. `[VERIFIED]`
+
+`meta2_host_impl.dll` carries the whole message family in `.rdata`:
+`Device '`, `': VID 0x`, ` PID 0x`, `' USB devices detected`, `No Meta SAQ board found.`,
+`': SuperSpeed!`, **`Device not connected in SuperSpeed mode.`**,
+**`Please reconnect device to a SuperSpeed port.`** `[VERIFIED]`
+
+The gate is a single byte test. At `0x180025dd5`:
+
+```
+mov  (%rbx),%rax
+cmpb $0x0,0x979(%rax)
+je   0x180025e6d      ; error path
+```
+
+The error path logs both SuperSpeed strings through the vtable slot at `0x1800331a8` and returns
+`2`. The byte at `+0x979` on the device object is the CyAPI SuperSpeed flag: `cyapi.dll` exports
+`CCyUSBDevice::GetSpeed` and `CCyBosSuperSpeedCapability` (constructed from
+`_USB_BOS_SS_DEVICE_CAPABILITY`), and the managed wrappers `CyUSB.dll` and `Meta.Driver.dll` expose
+`get_bSuperSpeed` / `get_bHighSpeed`, which `Meta.Driver` calls at IL `IL_0006` / `IL_0015`.
+`[VERIFIED]` by disassembly and export inspection.
+
+**Why this can invalidate IR-70.** The full stream set measured on the Linux host is
+`38.18 + 58.28 + 63.44 = 159.90 MB/s = 1279.2 Mbit/s`. A USB 2.0 high-speed bulk pipe realistically
+carries 25–40 MB/s in total; even the ToF endpoint alone at 63.44 MB/s is ~1.8× that ceiling. The
+SDK therefore cannot run the full set at high speed and must configure a reduced one — and §12.27
+already showed the adapter open path branches on `this+0x10178 == 2` (`USBConnectionType::USB30`)
+with different per-endpoint values for USB 2 versus USB 3. `[VERIFIED]` arithmetic and code path.
+
+So IR-70's sparse point cloud (6 of 637 polls non-zero) is **not yet** evidence about the ToF
+configuration. It is equally consistent with the SDK running in its USB 2 configuration. `[INFERRED]`
+Until `bSuperSpeed` is true on the physical PC, treat every SDK-level depth number from that machine
+as provisional. `[RULE]`
+
+`check_speed.ps1` (in `re/winpack2`, shipped in `meta2_win_depth_test_v2.zip`) walks the device's
+SetupAPI parent chain — Windows names SuperSpeed root hubs `ROOT_HUB30` — and, given `CyUSB.dll`,
+queries the same `bHighSpeed` / `bSuperSpeed` flags the SDK reads.
