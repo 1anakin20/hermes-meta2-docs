@@ -1,0 +1,9 @@
+t_ms,event,detail
+1007914464965,healthy,dev=4 conn=1 streams=4080
+1007914559037,phase,idle_hold
+1007914592657,phase,wall_2m
+1007914593241,phase,wall_2m
+1007914593462,phase,wall_2m
+1007914593680,phase,wall_2m
+1007914632590,phase,wall_05m
+1007914650613,phase,cover_cameras

@@ -1595,3 +1595,27 @@ Device bring-up, tracking, stream masks and depth convergence all differed betwe
 hardware for the same SDK build and the same probe. VM evidence is usable for the wire protocol and
 for driver behaviour; it is not usable for characterising what the SDK computes.
 Artifacts: `artifacts/ir70_win/`.
+
+## 31. §30's own conclusion was wrong: the shell is a device/pipeline property, not a VM artifact
+
+§30 concluded that the fixed 2.4465 m shell was a VM artifact. That is withdrawn. IR-74 ran the v2
+probe on the physical PC with a healthy device (`dev=4 conn=1` for 1396/1471 polls, tracking `(1,3)`
+for 1397 polls, stream mask `0xFFF` for 1339 polls, 33 scene-responsive RGB frames, all phase keys
+registered) and reproduced the shell: 3,233 points at mean radius **2.4563 m**, sd **0.0243 m**, hard
+max **2.4876 m** — the same hard maximum as the VM run, to the last digit. `[VERIFIED]`
+
+What IR-70 actually showed: 31 transient points at 0.858–2.176 m during bring-up and motion, not the
+shell behaving differently. `[VERIFIED]`
+
+What survives §30: the methodological rule. VM and physical hardware really do differ in bring-up,
+tracking, and stream masks — IR-74's `0xFFF` versus IR-70's `0xFBF` versus the VM's `0xFCF` proves
+that. What did not survive is the inference that a difference in masks explains the shell. `[RULE]`
+
+The decisive new fact is the phase pattern: `wall_2m` 0 points in 200 polls, `wall_05m` 0 points in
+161 polls, `cover_cameras` 6,822 points on the fixed sphere. A working depth camera does the opposite.
+`[VERIFIED]`
+
+And the shell radius is quantitatively the ToF ambiguity ceiling: `c/(2 × 2.4876 m) = 60.257 MHz`,
+against `c/(2 × 60 MHz) = 2.4983 m`. `[VERIFIED]` arithmetic; `[INFERRED]` that the imager modulates
+near 60 MHz and returns phase at the ceiling.
+Artifacts: `artifacts/ir74_win/`.

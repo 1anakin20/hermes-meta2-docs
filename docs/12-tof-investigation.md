@@ -1053,10 +1053,11 @@ IR-55b pinned maximum of `2.4876 m` was never reached — the observed maximum w
 `meta_get_reconstruction_mesh` still returned 0 vertices and 0 triangles for all 637 polls.
 `[VERIFIED]`
 
-**What this settles.** The fixed-radius shell reported in §12.15 and §12.16 was a property of
-the VM configuration, not of the device pipeline. On real hardware the SDK produces sparse but
-variable-radius points together with live tracking and live pose. That is what a depth path
-looks like when it is running and only partly converging. `[INFERRED]` from the above, strong.
+**What this settles.** ~~The fixed-radius shell reported in §12.15 and §12.16 was a property of the
+VM configuration, not of the device pipeline.~~ **This conclusion is withdrawn — see §12.31.** IR-74
+reproduced the shell bit-for-bit on the same physical PC with a healthy device, a full stream mask,
+live RGB and tagged phases. IR-70's varied radii (`0.858`–`2.176 m`) were a handful of transient
+points, not the shell returning. `[VERIFIED]` superseded by §12.31.
 
 **What this run could not answer.** Three probe defects cost us the decisive half of the data:
 
@@ -1160,3 +1161,72 @@ irrelevant to `DeviceStreamBlock`, the depth path, or the point cloud. `[VERIFIE
 `check_env.ps1` (in `re/winpack2`) prints every `META_*` variable at Process, User and Machine scope,
 flags any pointing into a different user's profile, and reports the owning account of running Meta
 processes.
+
+## 12.31 IR-74 — the decisive physical run: the shell is real, and it is the ToF ambiguity ceiling
+
+The v2 probe ran correctly on the physical PC. Archive `m2out2_4.zip` (72,624,650 B, sha256
+`cd01fa89a38c8c624bdb3a2cd32bf2d1ae2a47d1cbce2660d715875ce8a7f769`), extracted to
+`re/ir74_win/run4/m2out2/`. 1471 polls over 209.9 s. `[VERIFIED]`
+
+**The probe and the run are trustworthy.** Healthy at 9 s (`events.csv`: `healthy, dev=4 conn=1
+streams=4080`). `dev=4 conn=1` for 1396/1471 polls. `meta_get_tracking_status = (1,3)` for 1397 polls.
+No `FAILURE.txt`. Stream mask `0xFFF` for 1339 polls — every bit set, versus `0xFBF`/`0xF8F` in IR-70
+and `0xFCF` in the VM. 33 RGB frames captured, and they are scene-responsive: `wall_2m` frames mean
+luminance 48–50 with max 151–168, `wall_05m` frames mean 85–88, `idle_hold` 54–61. Phase keys all
+registered: `idle_hold` at 94 s, `wall_2m` at 128 s, `wall_05m` at 168 s, `cover_cameras` at 186 s.
+`[VERIFIED]`
+
+**The wall produced nothing.** Points per phase, from `points.csv` and `depth_stats.csv`:
+
+| phase | polls | polls with points | points | max radius |
+|---|---|---|---|---|
+| `startup` | 881 | 1 | 6 | 0.352 m |
+| `idle_hold` | 180 | 0 | 0 | — |
+| `wall_2m` | 200 | 0 | 0 | — |
+| `wall_05m` | 161 | 0 | 0 | — |
+| `cover_cameras` | 49 | 5 | 6,822 | **2.4876 m** |
+
+`[VERIFIED]`
+
+**The shell came back, identical to the VM's.** Restricting the `cover_cameras` cloud to
+`r >= 1.0 m`: 3,233 points, mean radius **2.4563 m**, sd **0.0243 m**, min 2.3314 m, hard max
+**2.4876 m**. The IR-55b VM shell was mean 2.4465 m, sd 0.021–0.027 m, hard max 2.4876 m. The hard
+maximum matches to the last digit across a VM run and a physical run. A second cluster of 3,520
+points sits at the origin (mean 0.0306 m); only 69 points lie between 0.1 m and 1.0 m. `[VERIFIED]`
+
+**So §12.28's conclusion was wrong and is withdrawn.** The shell is environment-independent. IR-70's
+`0.858`–`2.176 m` radii were a handful of transient points during bring-up and motion, not the shell
+behaving differently. `[VERIFIED]`
+
+**The shell radius is the ToF ambiguity ceiling at 60 MHz.** For phase-based ranging the unambiguous
+range is `c / (2f)`:
+
+```
+f = 20 MHz -> 7.4948 m
+f = 30 MHz -> 4.9965 m
+f = 40 MHz -> 3.7474 m
+f = 60 MHz -> 2.4983 m      <-- shell max 2.4876 m is 0.4% below this
+f = 80 MHz -> 1.8737 m
+```
+
+Inverting the observed shell: `c / (2 * 2.4876) = 60.257 MHz`, and the shell mean gives 61.025 MHz.
+`[VERIFIED]` arithmetic. `[INFERRED]` that the imager is modulating near 60 MHz and every pixel
+returns a phase at or near the ceiling — that is, the ToF path is running but saturated/invalid, and
+the pipeline back-projects its maximum range onto a sphere centred on the device. This is the first
+quantitative handle on the modulation frequency, and it is consistent with `royale.2.3.1.dll`'s
+`.rdata` containing round modulation constants including 30 MHz (60 MHz being its second harmonic).
+
+**What the phase pattern says.** A real wall in view yields zero points. Covering the cameras yields
+thousands of points on the fixed sphere. That is the inverse of what a working depth camera does, and
+it means the point cloud is not being driven by measured range at all: with valid imagery the block
+emits nothing, and with the cameras occluded it emits its ceiling value. `[INFERRED]`, strong.
+
+**Open question this sharpens.** Whether `point_cloud_OUT` is a ToF product or a stereo/mono product.
+§12.19 placed it on `DeviceStreamBlock`, and the mono streams are enabled here (`0xFFF`), so both are
+still possible. The 60 MHz coincidence is the strongest single clue that it is the ToF path reporting
+its ambiguity ceiling.
+
+**Upload note.** Of five uploads, `m2out2.zip` (29,720,420 B) and `m2out2_1.zip` (1,998,692 B) arrived
+truncated — valid `PK\003\004` local headers, no end-of-central-directory record. The three 72,624,650 B
+uploads are byte-identical and complete. Analysis used the complete archive.
+

@@ -1,0 +1,8 @@
+t_ms,phase,event
+1007914559037,idle_hold,change
+1007914592657,wall_2m,change
+1007914593241,wall_2m,change
+1007914593462,wall_2m,change
+1007914593680,wall_2m,change
+1007914632590,wall_05m,change
+1007914650613,cover_cameras,change
