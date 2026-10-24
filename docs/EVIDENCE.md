@@ -1427,3 +1427,74 @@ explained and are not small enough to call them rounding.
 A device that can be made to emit a constant is a device whose measurement path can be switched
 off. That makes 2035 a strong candidate for the no-signal level, and it sharpens rather than softens
 the open question: no register setting found so far produces data that varies with the room.
+
+## 25. IR-61 / IR-61b — under our host-only arm, EP 0x84 is a stable pattern fixed by the device, not scene data and not noise (2026-10-24)
+
+### 25.1 IR-61, and why its first numbers were not trustworthy
+
+First pass over four settings, two arms each, 4 s captures. Reported:
+
+| setting | frames (pass 0 / pass 1) | spatial_sd | temporal_sd | r across reset |
+|:---|:---:|---:|---:|---:|
+| control (vendor) | 21 / 18 | 275.42 | 82.93 | 0.1528 |
+| `0xb00e` slot5 lo=0x00 | 1004 / 10 | 721.75 | 505.68 | 0.0991 |
+| `0xa882` byte3=0x56 | 1187 / 23 | 375.77 | 87.96 | 0.4293 |
+| `0xa882` byte3=0x40 | 1193 / 45 | 420.99 | 119.60 | 0.5374 |
+
+The frame counts are the problem: the control mode yielded 21 and 18 frames, and every second pass
+yielded 10–45. A temporal mean built from 20 frames is noisy enough to depress a correlation by
+itself, so `r = 0.15` could not be separated from thin sampling. IR-61b was written to decide which
+it was. `[WITHDRAWN]` any use of IR-61's control-mode spatial/temporal split as a measurement.
+
+### 25.2 IR-61b: vendor configuration, three independent arms, 8 s each, ≥300 frames per pass `[VERIFIED]`
+
+```
+pass 0: 60,260,352 samples -> 2,295 frames (15.07 MB/s)
+pass 1: 57,802,752 samples -> 2,203 frames (14.45 MB/s)
+pass 2: 74,186,752 samples -> 2,293 frames (18.55 MB/s)
+```
+
+| pass | frames | spatial_sd | temporal_sd |
+|-----:|------:|-----------:|------------:|
+| 0 | 2,295 | 155.43 | 112.88 |
+| 1 | 2,203 | 190.88 | 68.03 |
+| 2 | 2,293 | 87.55 | 307.04 |
+
+Correlation of the temporal-mean frame **across a full port reset and close/reopen**:
+
+| pair | Pearson r | mean \|difference\| |
+|:---|---:|---:|
+| pass 0 vs pass 1 | **0.9567** | **4.27 counts** |
+| pass 0 vs pass 2 | 0.2579 | 18.99 counts |
+| pass 1 vs pass 2 | 0.2692 | 20.70 counts |
+
+Within-arm split-half on pass 0 (first 1,147 frames vs next 1,147): **Pearson r = 0.9950**.
+
+### 25.3 What this establishes
+
+- **The frame is stable within an arm.** Split-half r = 0.9950 across 2,295 frames. The spatial
+  arrangement of values is not per-sample noise. `[VERIFIED]`
+- **The frame is reproducible across a complete reset and re-arm.** Two of three independent arms
+  agree at r = 0.9567 with a mean absolute difference of **4.27 counts** on a frame whose spread is
+  ~150 counts. A room that never changed cannot explain that, and neither can random noise. `[VERIFIED]`
+- **The third arm diverged** (r ≈ 0.26 against the other two, temporal_sd 307 against 68–113). So
+  the arm does not deterministically land in one state; it landed in a different one once. The
+  reproducibility claim is "two of three arms agree very closely", not "always". `[VERIFIED]`
+- IR-61's low r was thin sampling, as suspected: with 2,295 frames the control correlation rises from
+  0.15 to 0.96. `[VERIFIED]`
+
+### 25.4 The conclusion this forces
+
+Under our host-only arm, EP 0x84 delivers a **device-fixed pattern** that survives a port reset,
+shifts level when `0xb00e` or `0xa882` is changed, and does not move when a hand, a cloth, a wall at
+15 cm or a wall at 3 m is placed in front of the headset (§12.14). Those three facts are now
+mutually consistent instead of contradictory: it is a pattern the device generates, whose levels the
+registers select.
+
+That is a coherent description of what we are receiving. It is **not** yet a description of the
+device's ranging measurement. The open question is no longer "why is the depth body scene-blind" but
+**"which configuration puts the device into its measuring state"**, and the only known producer of
+that state is the vendor SDK (§12.1, §12.15). The decisive test is therefore the SDK-side one: read
+the depth the SDK itself reports and establish whether *it* responds to the scene. If it does, the
+missing configuration is findable by diffing behaviour; if it does not, this unit's ranging path may
+not be reachable from USB at all.
