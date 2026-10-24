@@ -858,3 +858,54 @@ Two things this settles:
 Placement caveat observed in the same run: inserting the four reads *before* the enable-mask transfer
 collapsed EP 0x82/0x83 to 0.01/0.03 MB/s, while appending them after the completed arm left EP 0x84 at
 9.8 MB/s. Reads obey the same in-place rule as writes.
+
+## 12.25 IR-67 / IR-68 — the band is writable RAM, the device echoes it exactly, and it does not govern depth `[VERIFIED]`
+
+IR-67 wrote the band back through the vendor's own transfer shape — `bRequest 0xC0`, `wValue 3`,
+`wIndex = wLength = 920`, payload `3d 60 b800` + 916 data bytes — inserted **in place** at arm index
+198, and read the band at the end of the arm. Four variants flipped one 16-bit word each. Every
+read-back was byte-identical to the baseline (0 words differ) and every EP 0x84 mean landed inside the
+0.17-count control drift. Read that way, the band looked read-only.
+
+That was an ordering artifact. The vendor driver does not read the band at the end of its arm: in
+`re/sdk_outs.tsv` the 916-byte write at index 587 is followed directly by the four reads at
+593/599/605/611. IR-68 reproduced that ordering — write and four reads as one block at the same arm
+position — and the picture inverts.
+
+Baseline band from IR-67; each variant flips exactly one 16-bit word with `^ 0xFFFF`:
+
+| variant | block b800 | block b880 | block b900 | EP 0x84 mean |
+|---|---|---|---|---|
+| write identical + immediate read | status `07`, 0 bytes | 0 words differ | 0 words differ | 2035.26 |
+| flip word 6 (`0x6b06`) | status `07`, 0 bytes | 0 words differ | 0 words differ | 2035.24 |
+| flip word 200 (`0x0e03`) | status `07`, 0 bytes | **1 word: `0x0e03 → 0xf1fc`** | 0 words differ | 2035.34 |
+| flip word 300 (`0x41a4`) | status `07`, 0 bytes | 0 words differ | **1 word: `0x41a4 → 0xbce5`** | 2035.26 |
+| write identical (repeat) | status `07`, 0 bytes | 0 words differ | 0 words differ | 2035.26 |
+
+Control-to-control mean drift **0.01 counts**; the flips move the mean by **−0.03 to +0.07**.
+
+What this establishes:
+
+1. **The band is writable RAM.** A single flipped word appears in the read-back at exactly that word
+   index, in exactly the block that word belongs to, and nowhere else. `0x0e03 → 0xf1fc` and
+   `0x41a4 → 0xbce5` are the intended `^ 0xFFFF` values.
+2. **The read-back only reflects the write when the read follows it inside the same scripted window.**
+   Read at the end of the arm, the band reports the pre-write contents. This is the same rule already
+   known for ordinary register reads — the control endpoint is a fixed script, and a read is served
+   from the state of its own step, not from a live bus.
+3. **The `0xb800` read is refused (`status 07`, no data) when issued immediately after the band
+   write.** The other three blocks answer normally. So the vendor's own read of `0xb800` after its own
+   write may well have been refused too — the passive trace carries no IN payloads, so that is
+   `[UNKNOWN]`.
+4. **Writing the band does not change what the depth endpoint reports.** Across both probes — modified
+   content written in place, at the vendor's own position, read back verified — EP 0x84 stayed at
+   2035.1–2035.5 with 0.01–0.17-count control drift. Combined with IR-63 (the vendor blob inert) this
+   closes the hypothesis that the missing measuring state lives in the `0xb800` program band.
+
+A secondary observation: words 458–511 — the 54 words past the end of the 916-byte write span — differ
+between the IR-67 captures (no band write) and every IR-68 capture (band write present), consistently
+in all five IR-68 variants. That tail is therefore sensitive to whether a band write occurred at all,
+not to the value written into the covered span. `[VERIFIED]` that it happens, `[UNKNOWN]` why.
+
+Scripts: `re/ir67_band_write.py`, `re/ir68_band_vendor_order.py`. Results:
+`re/ir67_band_write.json`, `re/ir68_band_vendor_order.json`.

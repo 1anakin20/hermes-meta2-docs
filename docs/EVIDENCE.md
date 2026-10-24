@@ -1552,3 +1552,25 @@ demodulated amplitude, of brightness, and of a raw frame is **1.0000** in all th
 
 There is no phase sequence in the stream. Withdrawn: any expectation that host-side demodulation of
 existing EP 0x84 captures can recover range.
+
+## 29. IR-67 → IR-68 — "the band is read-only" was an ordering artifact; it is writable RAM `[VERIFIED]`
+
+IR-67 wrote a modified 916-byte band in place at arm index 198 and read it back **at the end of the
+arm**: 0 words differ from baseline in every variant, EP 0x84 deltas −0.39 … −0.12 against a
+0.17-count control drift. Taken alone that reads as "host writes to this band are ignored".
+
+Withdrawn. The vendor reads the band *immediately after* writing it (`sdk_outs.tsv` 587 →
+593/599/605/611). IR-68 reproduced that ordering and the write became visible: flipping word 200
+(`0x0e03`) shows up as exactly one changed word in block `0xb880` (`0x0e03 → 0xf1fc`), flipping word
+300 (`0x41a4`) as exactly one changed word in block `0xb900` (`0x41a4 → 0xbce5`), and an identical
+write-back changes nothing. The band is writable RAM and the device echoes it faithfully — but only
+to a read issued inside the same scripted window. The `0xb800` block itself answers `status 07` with
+no data when read immediately after the write.
+
+The conclusion that survives both probes is the one that matters for the ToF question: with the write
+verified inside the device's own memory, EP 0x84 moved by −0.03 to +0.07 counts against a 0.01-count
+control drift. The `0xb800–0xb9ff` program band is not the missing measuring state.
+
+New operational rule: **to verify that a write took effect, read inside the same scripted window, at
+the position the vendor's own sequence uses.** Reading at the end of the arm reports pre-write state.
+Artifacts: `artifacts/ir67_band_write.json`, `artifacts/ir68_band_vendor_order.json`.
