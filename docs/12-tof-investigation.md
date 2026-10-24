@@ -643,19 +643,83 @@ specific to the depth/reconstruction output, not to the device link.
 **Two caveats, stated explicitly.**
 
 1. In both runs the SDK's stream mask was `0xFCF`: IMU ×4, RGB, PCLOUD, DEPTH, IR, NOISE, CONF active
-   and **MONO0/MONO1 absent**. The point cloud is a reconstruction product, and the SDK was running
-   with no mono camera input. That the SDK never localized (`track=0/0`, 0 mesh vertices) is consistent
-   with that. What is *established* is that the depth output it does produce is a fixed 2.45 m shell;
-   what is *not* established is that the SDK is incapable of metric depth when its mono path is
-   running.
+   and **MONO0/MONO1 absent**, and the SDK never localized (`track=0/0`, 0 mesh vertices). §12.19
+   later showed the point cloud is *not* a SLAM product — it is an output of `DeviceStreamBlock`, the
+   device's own depth product — so missing mono input does not explain an empty point cloud. What is
+   *established* is that the depth output the SDK produces is a fixed 2.45 m shell; what is *not*
+   established is whether any configuration makes that output scene-metric.
 2. IR-55's `wall_close_repeat` control is compromised: its RGB frames came back dark (mean 26.8
    against 85.8 for `wall_close`), so the cloth was probably still covering the headset. And burst
    *presence* did not reproduce between runs — IR-55 had bursts at 2 m and covered with none at 30 cm,
    IR-55b had none at 2 m / 1 m / 50 cm and bursts at 30 cm and covered. Burst presence is not a
    reliable signal; the shell radius is.
 
-**Next decisive experiment (IR-62).** Get MONO0/MONO1 into the SDK's stream mask and repeat the range
-map. If the point cloud becomes a surface at the true wall distance, the missing ingredient is the
-mono/VSLAM path and it is reachable through the SDK; if it stays a 2.45 m shell with mono running,
-then this unit's ranging path is not producing metric depth even under the vendor stack, and the
-host-side route has nothing left to copy.
+### 12.19 What the SDK's depth block actually is: Royale over an SAQ USB bridge
+
+Reading `meta_block_device_stream.dll` settles the architecture question §12.1–§12.18 had been
+circling. `DeviceStreamBlock` owns `std::unique_ptr<royale::ICameraDevice>` and
+`std::unique_ptr<royale::IDepthDataListener>` (a `RoyaleDataListener`) and registers a callback taking
+`royale::DepthData const*`. In the graph schema embedded in `meta_core_api.dll`, the
+`point_cloud_OUT` port that feeds `CompositorBlock`, `HandsDataPreprocessingBlock0` and
+`EnvironmentReconstructionBlock` is an **output of `DeviceStreamBlock`** — the point cloud is the
+device's depth product, not a reconstruction product.
+
+`royale.2.3.1.dll` carries the HAL that talks to this device over USB:
+
+- `royale::usb::bridge::BridgeSAQBase`, `BridgeImagerSAQ`, `royale::usb::enumerator::BusEnumeratorSAQ`,
+  `royale::usb::pal::saq::I2cAccessSAQ`, all parameterised on `sdc::SAQDriverManagerAdapterCls` — the
+  same "SAQ" name the vendor driver uses. **The vendor control protocol we decoded is Royale's SAQ
+  bridge protocol.**
+- Imagers `ImagerM2450` (`A11`, `A12_SR`, `A12_SSC`, `DirectAccess`) and `ImagerM2452` (`A11`,
+  `A11_SR`, `A11_SSC`, `B1x_SR`, …), with `DphyPllStrategyM2450_A12`, `ModPllStrategyM2450_A12`,
+  `ModPllStrategyM2452_A11`.
+- Modulation is expressed as Royale *use cases*: `UseCaseTwoPhase`, `UseCaseFourPhase`,
+  `UseCaseEightPhase`, `UseCaseGrayScale`, `UseCaseCalibration`, carrying `ExposureGray`,
+  `IntensityPhaseOrder`, `ExposureTimes`, `ExposureReferenceAmplitude`,
+  `AutoExposureRefAmplitude_Float`, executed through
+  `BridgeSAQBase::executeUseCase(uint64, int, int, uint64)`.
+- Processing is configured through `royale::setProcessingParameters(Vector<Pair<ProcessingFlag,
+  Variant>>)` / `getProcessingParameters`, with `getProcessingFlagName` naming each flag.
+
+The graph itself is also readable (`re/sdk_graph_schema.txt`, extracted from `meta_core_api.dll`):
+`DeviceStreamBlock` has attributes `enable_depth=true`, `enable_royale_recording=false`,
+`royale_recording_filename=""`, and the graph wires `mono0_OUT`/`mono1_OUT` into `VSlamBlock`,
+`depth_OUT`, `ir_OUT`, `point_cloud_noise_OUT` and `point_cloud_confidence_OUT`.
+
+That is the vocabulary the missing "measuring state" would be expressed in.
+
+### 12.20 IR-63 — the 920-byte `0xb800` blob is inert for the depth stream `[VERIFIED]`
+
+The wire census (`arm_full2.txt`, 138 OUTs) contains one transfer larger than anything else the vendor
+driver sends: a **920-byte write to `0xb800`**, followed by reads of `0xb800`, `0xb880`, `0xb900`,
+`0xb980`. Every host-side probe so far used `ctrl_seq_full.json`, whose largest write is 40 bytes —
+so the arm we have been streaming with **never contained that blob**. IR-6 had tested a `0xb800` blob
+write and found it inert, but as an isolated write, and IR-46 later proved that a write issued outside
+its arm position collapses the bulk endpoints; that null result was not conclusive.
+
+IR-63 inserts the blob **in place** in the working arm, bracketed by controls.
+
+| variant | EP 0x84 MB/s | mean | sd | sentinel % |
+|---|---|---|---|---|
+| control | 8.98 | 2037.31 | 141.85 | 0.407 |
+| `0xb800` blob inserted in place | 9.18 | 2037.44 | 141.99 | 0.409 |
+| `0xb800` slot inserted, data zeroed | 8.90 | 2037.58 | 143.20 | 0.416 |
+| `0xb800` blob appended at arm end | 0.00 | — | — | — |
+| `0xc2bc` table zeroed | 7.10 | 2042.81 | 146.89 | 0.442 |
+| control again | 9.14 | 2037.13 | 140.35 | 0.397 |
+
+Control-to-control drift **0.18 counts**. The blob moves the mean by **0.13 counts** — inside the
+drift. Appending it at the end kills every endpoint, reconfirming the in-place rule. The largest
+configuration write the vendor driver performs therefore has no measurable effect on what the depth
+endpoint reports, and the "we were missing the modulation table" hypothesis is closed for that
+transfer.
+
+**What did move:** zeroing the 40-byte payload of the `3da0c2bc` write shifted mean by **+5.5 counts**
+(30× the drift), raised sd from 141 to 147 and cut EP 0x84 from 8.98 to 7.10 MB/s. `0xc2bc` is a live
+parameter no probe had touched. Its vendor payload is a table, not a scalar:
+
+```
+004e 0000 2000 0000 08d3 0000 000a 0001 08d3 0000 004e 0001 08d3 0000 0082 0001 08d3 03ac 00c6 0001
+```
+
+with `0x08d3` recurring. IR-64 sweeps its bytes one at a time.

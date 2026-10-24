@@ -1,0 +1,1126 @@
+global_attributes: [
+    {
+      name: "dataset_directory",
+      value: "<DATASET_PLACE_HOLDER>",
+      type: VALUE
+    }
+  ],
+  components: [
+    {
+      task: "DeviceStreamBlock",
+      name: "DeviceStreamBlock",
+      library: "meta_block_device_stream",
+      attributes: [
+        {
+          name: "enable_depth",
+          value: "true",
+          type: VALUE
+        },
+        {
+          name: "wait_all_triggers",
+          value: "false",
+          type: VALUE
+        },
+        {
+          name: "all_spectre_filtering",
+          value: "false",
+          type: VALUE
+        },
+        {
+          name: "enable_audio",
+          value: "false",
+          type: VALUE
+        },
+        {
+          name: "enable_royale_recording",
+          value: "false",
+          type: VALUE
+        },
+        {
+          name: "royale_recording_filename",
+          value: "",
+          type: VALUE
+        }
+      ]
+    },
+    {
+      task: "WebcamBlock",
+      name: "WebcamBlock1",
+      library: "meta_block_webcam",
+      attributes: [
+        {
+          name: "wait_all_triggers",
+          value: "true",
+          type: VALUE
+        }
+      ]
+    },
+    {
+      task: "SensorsDbBlock",
+      name: "SensorsDbBlock",
+      library: "meta_block_sensors_db",
+      attributes: [
+        {
+          name: "wait_all_triggers",
+          value: "false",
+          type: VALUE
+        }
+      ]
+    },
+    {
+      task: "LooseFusionBlock",
+      name: "LooseFusionBlock",
+      library: "meta_block_slam",
+      attributes: [
+        {
+          name: "wait_all_triggers",
+          value: "false",
+          type: VALUE
+        },
+        {
+          name: "filter_initialized",
+          value: "false",
+          type: VALUE
+        },
+        {
+          name: "target_frame",
+          value: "mono_right",
+          type: VALUE
+        },
+        {
+          name: "source_frame",
+          value: "world",
+          type: VALUE
+        },
+        {
+          name: "imu_only_tracking",
+          value: "false",
+          type: VALUE
+        },
+        {
+          name: "visual_slam_name",
+          value: "VSlamBlock",
+          type: VALUE
+        },
+        {
+          name: "sensors_db_task_name",
+          value: "SensorsDbBlock",
+          type: VALUE
+        },
+        {
+          name: "enable_filter_logs",
+          value: "false",
+          type: VALUE
+        }
+      ]
+    },
+    {
+      task: "CompositorBlock",
+      name: "CompositorBlock",
+      library: "meta_block_compositor",
+      attributes: [
+        {
+          name: "wait_all_triggers",
+          value: "false",
+          type: VALUE
+        },
+        {
+          name: "loose_fusion_name",
+          value: "LooseFusionBlock",
+          type: VALUE
+        },
+        {
+          name: "sensors_db_task_name",
+          value: "SensorsDbBlock",
+          type: VALUE
+        }
+      ]
+    },
+    {
+      task: "HandsDataPreprocessingBlock",
+      name: "HandsDataPreprocessingBlock0",
+      library: "meta_block_data_preprocessing",
+      attributes: [
+        {
+          name: "wait_all_triggers",
+          value: "false",
+          type: VALUE
+        },
+        {
+          name: "draw",
+          value: "false",
+          type: VALUE
+        }
+      ]
+    },
+    {
+      task: "HandSegmentationBlock",
+      name: "HandSegmentationBlock1",
+      library: "meta_block_hand_segmentation",
+      attributes: [
+        {
+          name: "wait_all_triggers",
+          value: "false",
+          type: VALUE
+        },
+        {
+          name: "draw",
+          value: "false",
+          type: VALUE
+        },
+        {
+          name: "add_color_info",
+          value: "true",
+          type: VALUE
+        },
+        {
+          name: "min_no_of_fingers",
+          value: "3",
+          type: VALUE
+        }
+      ]
+    },
+    {
+      task: "HandTrackingBlock",
+      name: "HandTrackingBlock2",
+      library: "meta_block_hand_tracking",
+      attributes: [
+        {
+          name: "wait_all_triggers",
+          value: "false",
+          type: VALUE
+        },
+        {
+          name: "draw",
+          value: "false",
+          type: VALUE
+        }
+      ]
+    },
+    {
+      task: "HandFeatureExtractionBlock",
+      name: "RightHandFeatureExtractionBlock",
+      library: "meta_block_hand_feature_extraction",
+      attributes: [
+        {
+          name: "wait_all_triggers",
+          value: "true",
+          type: VALUE
+        },
+        {
+          name: "draw",
+          value: "false",
+          type: VALUE
+        }
+      ]
+    },
+    {
+      task: "HandsManagerBlock",
+      name: "HandsManagerBlock",
+      library: "meta_block_hands_manager",
+      attributes: [
+        {
+          name: "wait_all_triggers",
+          value: "true",
+          type: VALUE
+        }
+      ]
+    },
+    {
+      task: "EnvironmentReconstructionBlock",
+      name: "EnvironmentReconstructionBlock",
+      library: "meta_block_environment_reconstruction",
+      attributes: [
+        {
+          name: "wait_all_triggers",
+          value: "false",
+          type: VALUE
+        },
+        {
+          name: "loose_fusion_name",
+          value: "LooseFusionBlock",
+          type: VALUE
+        },
+        {
+          name: "sensors_db_task_name",
+          value: "SensorsDbBlock",
+          type: VALUE
+        },
+        {
+          name: "pause_task_on_start",
+          value: "true",
+          type: VALUE
+        }
+      ]
+    },
+    {
+      task: "DeviceStatusBlock",
+      name: "DeviceStatusBlock",
+      library: "meta_block_device_stream",
+      attributes: [
+        {
+          name: "wait_all_triggers",
+          value: "false",
+          type: VALUE
+        },
+        {
+          name: "debug",
+          value: "false",
+          type: VALUE
+        }
+      ]
+    },
+    {
+      task: "HandFeatureExtractionBlock",
+      name: "LeftHandFeatureExtractionBlock",
+      library: "meta_block_hand_feature_extraction",
+      attributes: [
+        {
+          name: "wait_all_triggers",
+          value: "true",
+          type: VALUE
+        },
+        {
+          name: "draw",
+          value: "false",
+          type: VALUE
+        }
+      ]
+    },
+    {
+      task: "VSlamBlock",
+      name: "VSlamBlock",
+      library: "meta_block_slam",
+      attributes: [
+        {
+          name: "wait_all_triggers",
+          value: "true",
+          type: VALUE
+        },
+        {
+          name: "sensors_db_task_name",
+          value: "SensorsDbBlock",
+          type: VALUE
+        },
+        {
+          name: "vocabulary",
+          value: "data/vslam_voc.bin",
+          type: VALUE
+        },
+        {
+          name: "target_frame",
+          value: "mono_right",
+          type: VALUE
+        },
+        {
+          name: "source_frame",
+          value: "world",
+          type: VALUE
+        },
+        {
+          name: "show_debug_controls",
+          value: "false",
+          type: VALUE
+        }
+      ]
+    }
+  ],
+  connections: [
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "xml_calibration_OUT"
+      },
+      dst: {
+        task: "SensorsDbBlock",
+        port: "xml_config_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "imu0_acc_OUT"
+      },
+      dst: {
+        task: "LooseFusionBlock",
+        port: "acceleration_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "imu0_gyro_OUT"
+      },
+      dst: {
+        task: "LooseFusionBlock",
+        port: "gyro_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "point_cloud_OUT"
+      },
+      dst: {
+        task: "CompositorBlock",
+        port: "point_cloud_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "HandsDataPreprocessingBlock0",
+        port: "frame_data_OUT"
+      },
+      dst: {
+        task: "HandSegmentationBlock1",
+        port: "frame_data_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "HandSegmentationBlock1",
+        port: "frame_data_OUT"
+      },
+      dst: {
+        task: "HandTrackingBlock2",
+        port: "frame_data_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "HandTrackingBlock2",
+        port: "frame_data_OUT"
+      },
+      dst: {
+        task: "RightHandFeatureExtractionBlock",
+        port: "frame_data_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "point_cloud_OUT"
+      },
+      dst: {
+        task: "HandsDataPreprocessingBlock0",
+        port: "point_cloud_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "point_cloud_OUT"
+      },
+      dst: {
+        task: "EnvironmentReconstructionBlock",
+        port: "point_cloud_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: BUFFER,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 10
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "imu0_acc_OUT"
+      },
+      dst: {
+        task: "DeviceStatusBlock",
+        port: "imu0_acc_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: BUFFER,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 10
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "imu0_gyro_OUT"
+      },
+      dst: {
+        task: "DeviceStatusBlock",
+        port: "imu0_gyro_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: BUFFER,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 10
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "imu1_acc_OUT"
+      },
+      dst: {
+        task: "DeviceStatusBlock",
+        port: "imu1_acc_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: BUFFER,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 10
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "imu1_gyro_OUT"
+      },
+      dst: {
+        task: "DeviceStatusBlock",
+        port: "imu1_gyro_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: BUFFER,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 10
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "mono0_OUT"
+      },
+      dst: {
+        task: "DeviceStatusBlock",
+        port: "mono0_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: BUFFER,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 10
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "mono1_OUT"
+      },
+      dst: {
+        task: "DeviceStatusBlock",
+        port: "mono1_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: BUFFER,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 10
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "point_cloud_confidence_OUT"
+      },
+      dst: {
+        task: "DeviceStatusBlock",
+        port: "point_cloud_confidence_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: BUFFER,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 10
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "depth_OUT"
+      },
+      dst: {
+        task: "DeviceStatusBlock",
+        port: "depth_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: BUFFER,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 10
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "point_cloud_noise_OUT"
+      },
+      dst: {
+        task: "DeviceStatusBlock",
+        port: "point_cloud_noise_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: BUFFER,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 10
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "ir_OUT"
+      },
+      dst: {
+        task: "DeviceStatusBlock",
+        port: "ir_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: BUFFER,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 10
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "color_OUT"
+      },
+      dst: {
+        task: "DeviceStatusBlock",
+        port: "color_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: BUFFER,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 10
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "point_cloud_OUT"
+      },
+      dst: {
+        task: "DeviceStatusBlock",
+        port: "point_cloud_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "HandTrackingBlock2",
+        port: "frame_data_OUT"
+      },
+      dst: {
+        task: "LeftHandFeatureExtractionBlock",
+        port: "frame_data_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "HandTrackingBlock2",
+        port: "left_hand_OUT"
+      },
+      dst: {
+        task: "LeftHandFeatureExtractionBlock",
+        port: "hand_data_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "HandTrackingBlock2",
+        port: "right_hand_OUT"
+      },
+      dst: {
+        task: "RightHandFeatureExtractionBlock",
+        port: "hand_data_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "LeftHandFeatureExtractionBlock",
+        port: "hand_data_OUT"
+      },
+      dst: {
+        task: "HandsManagerBlock",
+        port: "hand_two_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "RightHandFeatureExtractionBlock",
+        port: "hand_data_OUT"
+      },
+      dst: {
+        task: "HandsManagerBlock",
+        port: "hand_one_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "color_OUT"
+      },
+      dst: {
+        task: "HandSegmentationBlock1",
+        port: "color_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "mono0_OUT"
+      },
+      dst: {
+        task: "VSlamBlock",
+        port: "left_mono_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "mono1_OUT"
+      },
+      dst: {
+        task: "VSlamBlock",
+        port: "right_mono_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "VSlamBlock",
+        port: "pose_OUT"
+      },
+      dst: {
+        task: "LooseFusionBlock",
+        port: "pose_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "DeviceStreamBlock",
+        port: "color_OUT"
+      },
+      dst: {
+        task: "CompositorBlock",
+        port: "rgb_undistorted_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "CompositorBlock",
+        port: "webcam_composite_OUT"
+      },
+      dst: {
+        task: "WebcamBlock1",
+        port: "rgb_composite_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "CompositorBlock",
+        port: "webcam_undistort_OUT"
+      },
+      dst: {
+        task: "WebcamBlock1",
+        port: "rgb_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    },
+    {
+      type: {
+        buffer: DATA,
+        sync: LOCKED,
+        transport: LOCAL,
+        buffer_size: 1
+      },
+      src: {
+        task: "WebcamBlock1",
+        port: "webcam_streaming_status_OUT"
+      },
+      dst: {
+        task: "CompositorBlock",
+        port: "webcam_streaming_status_IN"
+      },
+      expected_service_rate: 0,
+      service_frame_time_slack_percentage: 50
+    }
+  ],
+  activities: [
+    {
+      schedule: {
+        parallel: true,
+        policy: PERIODIC,
+        period: 250,
+        affinity: -1,
+        exclusive_affinity: false,
+        priority: NORMAL
+      },
+      components: [
+        "DeviceStreamBlock"
+      ]
+    },
+    {
+      schedule: {
+        parallel: true,
+        policy: TRIGGERED,
+        period: 1,
+        affinity: -1,
+        exclusive_affinity: false,
+        priority: NORMAL
+      },
+      components: [
+        "WebcamBlock1"
+      ]
+    },
+    {
+      schedule: {
+        parallel: true,
+        policy: TRIGGERED,
+        period: 1,
+        affinity: -1,
+        exclusive_affinity: false,
+        priority: NORMAL
+      },
+      components: [
+        "SensorsDbBlock"
+      ]
+    },
+    {
+      schedule: {
+        parallel: true,
+        policy: TRIGGERED,
+        period: 1,
+        affinity: -1,
+        exclusive_affinity: false,
+        priority: REALTIME
+      },
+      components: [
+        "LooseFusionBlock"
+      ]
+    },
+    {
+      schedule: {
+        parallel: true,
+        policy: TRIGGERED,
+        period: 1,
+        affinity: -1,
+        exclusive_affinity: false,
+        priority: REALTIME
+      },
+      components: [
+        "CompositorBlock"
+      ]
+    },
+    {
+      schedule: {
+        parallel: true,
+        policy: TRIGGERED,
+        period: 1,
+        affinity: -1,
+        exclusive_affinity: false,
+        priority: NORMAL
+      },
+      components: [
+        "HandsDataPreprocessingBlock0"
+      ]
+    },
+    {
+      schedule: {
+        parallel: true,
+        policy: TRIGGERED,
+        period: 1,
+        affinity: -1,
+        exclusive_affinity: false,
+        priority: NORMAL
+      },
+      components: [
+        "HandSegmentationBlock1"
+      ]
+    },
+    {
+      schedule: {
+        parallel: true,
+        policy: TRIGGERED,
+        period: 1,
+        affinity: -1,
+        exclusive_affinity: false,
+        priority: NORMAL
+      },
+      components: [
+        "HandTrackingBlock2"
+      ]
+    },
+    {
+      schedule: {
+        parallel: true,
+        policy: TRIGGERED,
+        period: 1,
+        affinity: -1,
+        exclusive_affinity: false,
+        priority: NORMAL
+      },
+      components: [
+        "RightHandFeatureExtractionBlock"
+      ]
+    },
+    {
+      schedule: {
+        parallel: true,
+        policy: TRIGGERED,
+        period: 1,
+        affinity: -1,
+        exclusive_affinity: false,
+        priority: NORMAL
+      },
+      components: [
+        "HandsManagerBlock"
+      ]
+    },
+    {
+      schedule: {
+        parallel: true,
+        policy: TRIGGERED,
+        period: 1,
+        affinity: -1,
+        exclusive_affinity: false,
+        priority: NORMAL
+      },
+      components: [
+        "EnvironmentReconstructionBlock"
+      ]
+    },
+    {
+      schedule: {
+        parallel: true,
+        policy: PERIODIC,
+        period: 250,
+        affinity: -1,
+        exclusive_affinity: false,
+        priority: BELOW_NORMAL
+      },
+      components: [
+        "DeviceStatusBlock"
+      ]
+    },
+    {
+      schedule: {
+        parallel: true,
+        policy: TRIGGERED,
+        period: 1,
+        affinity: -1,
+        exclusive_affinity: false,
+        priority: NORMAL
+      },
+      components: [
+        "LeftHandFeatureExtractionBlock"
+      ]
+    },
+    {
+      schedule: {
+        parallel: true,
+        policy: TRIGGERED,
+        period: 1,
+        affinity: -1,
+        exclusive_affinity: false,
+        priority: REALTIME
+      },
+      components: [
+        "VSlamBlock"
+      ]
+    }
+  ]
+}

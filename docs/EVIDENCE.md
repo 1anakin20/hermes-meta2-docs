@@ -1520,6 +1520,20 @@ Withdrawn / bounded: any reading of these point clouds as measured distance. The
 pipeline artifact.
 
 Open boundary, stated rather than papered over: the SDK ran with stream mask `0xFCF`, which excludes
-MONO0/MONO1, and the point cloud is a reconstruction product. So "the SDK's depth output is a fixed
-shell" is verified; "the SDK cannot produce metric depth" is not, because its mono input was never
-running. IR-62 (mono streams enabled, same range map) is the experiment that closes it.
+MONO0/MONO1. §12.19 later established that the point cloud is *not* a SLAM product but an output of
+`DeviceStreamBlock` — the device's own depth product — so absent mono input does not explain an empty
+point cloud. "The SDK's depth output is a fixed shell" is verified; whether any configuration makes it
+scene-metric is not.
+
+## 27. IR-63 — the vendor driver's largest configuration write is inert for depth `[VERIFIED]`
+
+The wire census contains a **920-byte write to `0xb800`** that no host-side arm had ever replayed
+(`ctrl_seq_full.json`'s largest write is 40 bytes). Inserted in place, bracketed by controls with
+0.18-count drift, it moved the EP 0x84 mean by **0.13 counts** — inside the noise. Appended at the end
+of the arm it collapsed every endpoint to zero, reconfirming the in-place rule (§12.13).
+
+Withdrawn: the hypothesis that the missing "measuring state" is a modulation table we had been dropping
+from the arm. For this transfer it is not.
+
+What did respond: zeroing the 40-byte `0xc2bc` table moved mean **+5.5 counts** (30× drift), sd
+141 → 147, and EP 0x84 8.98 → 7.10 MB/s. `0xc2bc` is a live parameter, previously unprobed.
