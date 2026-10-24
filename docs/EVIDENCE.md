@@ -1034,3 +1034,17 @@ adjacent at arm position 68:
 The `0xb800` blob write was already tested in IR-6 and produced no change in readable bytes and
 no change on EP `0x84` (§12). **No hidden illumination or modulation command distinguishes the
 SDK's configuration from ours.** `[VERIFIED]`
+
+## 21. Our host-only arm drives the IR emitter `[VERIFIED]`
+
+Blinded, randomised, balanced 16-trial test (`re/illum_blind.py`, seed 1792809976):
+**armed 8/8 reported GLOW, un-armed 8/8 reported NO GLOW**, with EP `0x84` measured at
+13.45–14.08 MB/s in every armed trial and 0.00 MB/s in every un-armed trial. Fisher exact
+one-sided p = 7.77 × 10⁻⁵. Detector validated against a TV remote first.
+
+- **Withdrawn:** "our host-side replay of the vendor command sequence does not drive the
+  emitter" (§12.7). `[WITHDRAWN]`
+- **Withdrawn:** the §12.14 `[INFERRED]` explanation that the depth body is scene-blind because
+  illumination is off under the host-only arm. Illumination is on. `[WITHDRAWN]`
+- **Still open:** whether the lit emitter is the ToF illuminator specifically (`[INFERRED]`), and
+  what makes the depth body respond to the scene now that illumination is ruled out as the cause.

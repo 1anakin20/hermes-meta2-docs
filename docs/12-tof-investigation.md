@@ -142,7 +142,9 @@ SDK STOPPED. `MetaReader.exe` was the SDK. Phase timestamps are in the run log.
 | 04:07:33 – 04:08:03 | SDK STOPPED (cycle 2) | stopped | off |
 
 Four off-windows and two on-windows, every one matching its phase. `[CAPTURED]`: **the vendor
-SDK run drives the emitter; our host-side replay of the vendor command sequence does not.**
+SDK run drives the emitter.** The companion half of that sentence — that our host-side replay
+does **not** — is **withdrawn**; §12.15 shows a blinded test in which our own arm lights the
+emitter in 8 of 8 armed trials and 0 of 8 un-armed trials.
 Both SDK cycles genuinely streamed — `rgb_frames=272 pclouds=55 polls=1290` and
 `rgb_frames=233 pclouds=47 polls=1133` — so the light is not an artifact of a process that
 started and then did nothing.
@@ -445,7 +447,67 @@ t = 2.95 — larger than four of the five scene conditions. Median per-second qu
 byte identity is flat at 30.1% across every lag, which is exactly what a constant high byte plus a
 varying low byte produces.
 
-So the body is well-formed, correctly framed, internally structured, and blind. `[INFERRED]` that
-the ToF illumination is not running under the host-only arm. `[UNKNOWN]` which register switches it
-on — `0xa882` and `0xa886` are the strongest candidates because perturbing either one silences the
-endpoint entirely, but silencing is not the same as being the illumination enable.
+So the body is well-formed, correctly framed, internally structured, and blind.
+
+**The earlier `[INFERRED]` explanation — that illumination is off under the host-only arm — is
+now falsified** (§12.15: our arm lights the front IR emitter in 8/8 blinded armed trials). The
+remaining candidates are therefore that (a) the emitter is on but the **modulation** is not
+running or not synchronised, (b) the plane we read is not a correlation image at all but a
+quality/confidence map, or (c) the depth path needs a configuration step that is not a vendor
+control transfer. `[UNKNOWN]` which of these it is.
+
+## 12.15 The host-only arm lights the front IR emitter — blinded test `[VERIFIED]`
+
+This reverses the conclusion of §12.7 and falsifies the explanation offered in §12.14.
+
+**Detector validated first.** The operator's phone camera saw an IR flash from a TV remote
+(`illum_obs.jsonl`, phase `phone_control`). Without this control, a negative is meaningless.
+
+**Design** (`re/illum_blind.py`). The operator sees only "Trial N of 16 — is there a glow?".
+The script chooses, from a seeded random balanced order, whether the device is **armed and
+streaming** or **port-reset and idle**, and records the ground truth beside the answer. The
+coach page is deliberately given no throughput, no arm countdown and no state name, so the
+operator cannot infer the condition. Each trial also measures EP `0x84` throughput during the
+14 s observation window, so the optical claim is corroborated electrically.
+
+- armed: `reset_open()`, full `ctrl_seq_full.json` arm, then continuous `sets()` strobe
+- idle: `open_device()`, `dev.reset()`, `finalize()`, reopen, claim, **no control traffic at all**
+
+**Run 2 — 16 trials, seed 1792809976,** order
+`idle arm arm arm idle idle arm idle arm idle idle arm arm idle idle arm`:
+
+| trial | truth | EP `0x84` | answer |
+|---|---|---|---|
+| 1, 5, 6, 8, 10, 11, 14, 15 | idle | 0.00 MB/s | NO GLOW |
+| 2, 3, 4, 7, 9, 12, 13, 16 | arm | 13.45 – 14.08 MB/s | **GLOW** |
+
+**8/8 armed → GLOW. 8/8 un-armed → NO GLOW. Perfect separation.** Fisher exact one-sided
+**p = 7.77 × 10⁻⁵**. The probability that 16 answers all match ground truth by chance is
+2⁻¹⁶ = 1.53 × 10⁻⁵.
+
+**Run 1 — 8 trials, seed 1792808896** — armed 3/4, un-armed 0/4, p = 0.071. Not significant on
+its own; the single miss was trial 1, where the gate advanced before the operator was looking.
+Pooled across both runs: armed 11/12, un-armed 0/12, **p = 4.81 × 10⁻⁶**.
+
+**Supporting single observations** (`illum_obs.jsonl`): glow reported while armed at
+02:22:42Z; no glow reported at 02:25:08Z, which was after the 150 s arm had already ended; and
+"Glow is GONE" in the un-armed control at 02:27:26Z, during a 60-second window measured at
+0.000 MB/s on every endpoint (`ir52_idle.jsonl`).
+
+**What is established.** An IR emitter at the front of the headset is on when our host-only
+vendor arm is applied and off when the device is port-reset and un-armed. `[VERIFIED]`
+
+**What is not established.** That this emitter is specifically the ToF illuminator rather than
+another front-facing IR LED. It is the only front IR emitter described, and §12.7 places the
+depth camera at the front centre where the glow was seen, so the identification is
+`[INFERRED]`, not shown.
+
+**Consequence.** The §12.14 explanation for scene-blindness — illumination off — is dead. The
+depth path is illuminated and streaming, and still does not respond to a palm, an opaque cloth,
+a wall at 15 cm or a wall at 4 m. The missing ingredient is modulation, or the plane is not a
+range image.
+
+**Method note.** A first attempt at this test (`re/illum_coach.py` + `illum_hostarm.py` +
+`illum_idle.py`) was non-blinded and is reported only as supporting evidence. The blinded
+design is the one that carries the conclusion. A unit bug in `illum_blind.py` printed
+`bytes / 1e6` over the whole 14 s window as `mb_s`; the table above is corrected to true MB/s.
