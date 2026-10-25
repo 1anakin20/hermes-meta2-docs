@@ -1927,3 +1927,54 @@ byte-for-byte except one `0xb800` program write, and that band was already prove
 `0x84` by IR-63 and IR-68; the physical SDK produced zero wall depth (IR-74) and `pc_nz = 0` across
 a full healthy run (IR-82); and no command is issued while streaming. Next work moves to
 `meta2lib`: RGB `0x83`, mono `0x82`, IMU, and EP `0x84` framing.
+
+
+### 12.46 The arm transcript is missing five payloads — and v10 goes to get them
+
+IR-83 closed the *command* question, which exposed a *payload* question we had been walking past for
+weeks. `ctrl_seq_full.json` contains five control OUT transfers whose data stage was never recorded:
+
+```
+#201  wValue=3  wIndex=2336  wLength=2336  payload = (empty)
+#204  wValue=3  wIndex=608   wLength=608   payload = (empty)
+#207  wValue=3  wIndex=608   wLength=608   payload = (empty)
+#210  wValue=3  wIndex=608   wLength=608   payload = (empty)
+#213  wValue=3  wIndex=338   wLength=338   payload = (empty)
+```
+
+`[MEASURED]` 4,498 bytes of control data the vendor SDK sent and usbmon never captured — usbmon
+records setup packets, not the data stage of large control writes. `[MEASURED]` `harness.send()`
+does `bytes.fromhex(cmd["payload"])`, so every host-side experiment in this project replayed those
+five transfers with an **empty data stage** (pyusb derives `wLength` from the data length).
+
+`[MEASURED]` Their position in the transcript is between the `C402` read and the `BFF8` write —
+exactly where IR-83 shows the vendor's `WriteI2C(reg=0xb800)` and the `ReadFromSPIMemory(dev=8,
+addr=0x30000)` pair. `2336 = 0x920`, a program-image-sized transfer.
+
+`[INFERRED, leading hypothesis]` These are the imager program upload and/or the per-unit calibration
+blob. If the device never receives them it stays in a default mode: endpoint configured, modPLL
+locked, emitter driven, and a placeholder pattern on EP `0x84`. That single gap accounts for every
+surprising measurement in §12.20–§12.45 — including IR-65's "no multiphase structure" (there is no
+phase data to see) and IR-63/IR-68's "the `0xb800` band is inert" (we wrote mutated bytes, never the
+authentic program).
+
+**v10 instrument.** `re/proxy_gen3.py` extends the `meta2_host_impl.dll` proxy with import-table
+hooks on the *genuine* module: `CreateFileA`, `DeviceIoControl`, `ReadFile`, `WriteFile` thunks are
+replaced after `LoadLibraryExA`, each shim calling the true kernel32 target and logging around it.
+`DeviceIoControl` dumps both buffers in full when each is ≤ 4096 bytes — OUT before the call, IN
+after it, and never for overlapped calls, because an overlapped buffer is not filled when the call
+returns. Bulk camera reads (202,784 / 1,843,232 bytes) exceed the cap and are skipped, which is what
+keeps the log at megabytes instead of gigabytes.
+
+`[VERIFIED before shipping]` proxy exports 2896/2896 identical to vendor; hook strings present in the
+shipped DLL (`IATHOOK`, `DEVIO #`, `CREATEFILE h=`); `MetaProbe.cs` and `Preflight.cs` compile clean.
+Package `meta2_win_probe_v10.zip`, 594,788 B, sha256
+`18aa2d49004dafe0a7386352528953ff3903afdcd49b91f3a89f4606ec877653`, 24 members. Default run shortened
+to 120 s because IR-83 proved the entire control conversation occupies the first 8.1 s and the last
+2.4 s.
+
+**Decision rule for IR-84.** If the captured payloads are non-trivial (program/calibration bytes),
+replay the arm *with* them on the Linux box and test the one metric that has been the target all
+along: EP `0x84` statistics between a hand at 10 cm and 1 m. If the transfers turn out to be small or
+empty on the wire too, hypothesis "module degraded / SDK2 Beta depth is a stub" moves to the front and
+the RGB/mono/IMU/EP `0x84` framing ships into `meta2lib`.
