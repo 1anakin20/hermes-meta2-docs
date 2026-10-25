@@ -1710,3 +1710,44 @@ risky call is now preceded by a flushed `CANARY -> <name>` line, and each poll s
 `CANARY -> poll N phase=<phase>`, so a future crash names the exact call that caused it from a
 machine we are not sitting at. Package: `meta2_win_probe_v7.zip`, 244,821 B,
 sha256 `28f7fd6ad75e88ca71dd69f48af82e1fac929a7efcbc1ff723f74f8c7e35b951`.
+
+### 12.42 — IR-81: the canary pinned the crash; `meta_get_point_cloud` is a fill API
+
+Upload: `m2out3_LAPTOP-DC9899IK_20261025_124618.zip` (19,700 B, 15 files, zip intact),
+extracted to `re/ir81_win/run1/`. v7 package, `mode: SAFE (disassembly-derived getters skipped)`.
+
+**Measured — the last line of `probe_log.txt` is the diagnosis:**
+
+```
+[011.142s] CANARY -> poll 5 phase=startup
+[011.142s] HEALTHY at 11.1s dev=4 conn=1 streams=3983
+[011.142s] CANARY -> point_cloud
+```
+
+No `point_cloud ok`. Polls 1–4 completed `point_cloud` → `reconstruction_mesh` cleanly while the
+device was still `dev=1 conn=2 streams=0`; the process died inside `meta_get_point_cloud` on the
+first poll where the device was healthy. `run_stamp.txt`: 12:45:45.55 → 12:46:01.25 (15.7 s against
+a 420 s request). The proxy trailer `=== proxy unloading ===` is absent, confirming abnormal
+termination.
+
+**Root cause (measured by construction, not inferred from a crash dump).** The v4–v7 probe declared
+`MetaPointCloud { int numPoints; IntPtr points; }`, left `points = IntPtr.Zero`, and expected the
+SDK to hand back a pointer. `meta_get_point_cloud` is a **fill** API: the caller owns the buffer and
+the SDK writes into it. With `points = NULL` the SDK wrote `101024 × 3` floats to address 0 — an
+uncatchable `AccessViolationException` in .NET Framework, and only once real data existed. The
+proven IR-74 probe (`winpack2/MetaDepth2.cs`) had it right all along:
+`pc.points = Marshal.AllocHGlobal(352*288*3*4)` before the call, then clamp `num_points` to the cap.
+
+**v8 fix.** `MetaProbe.cs` now allocates `pcBuf = 352*288*3*4` bytes once before the poll loop,
+sets `pc.points = pcBuf; pc.numPoints = pcCap` before every call, and clamps the returned count to
+`[0, pcCap]`. Also fixed: `t0` is set before the first log line (v7 printed the mode line with a
+garbage elapsed stamp). Package `meta2_win_probe_v8.zip`, 245,047 B,
+sha256 `2230cfb5d89ef8a0ffea61801fbd28e7eb130c1503433e7d44754d11220b5dbd`.
+
+**What survives from IR-80.** The proxy transcript (3 calls, `Open` → 1, GUID
+`92BBA85A-A430-9D44-B94E-5B995E862939`), the accepted recording attributes, and the healthy-state
+signature. `cyapi_calls.log` is again only 1,248 B because the process died before any bulk
+transfer — not a proxy fault. `[VERIFIED]`
+
+**Note on healthy-state variance.** IR-74 healthy was `streams=4080`, IR-80 `4080`, IR-81 `3983`.
+The stream mask is not a constant across runs; do not gate a run on an exact mask value.
