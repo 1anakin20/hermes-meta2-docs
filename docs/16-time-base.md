@@ -97,7 +97,7 @@ case RGB carried its clock the way the mux record does; the apparent u64 fields 
 `+16` u64 delta is exactly 2³², i.e. the counter crossing into the high word), not
 64-bit fields.
 
-**Conclusion: EP `0x83` exposes no device timestamp.** RGB frames can be ordered by
+**Conclusion as measured: no timestamp in the RGB record HEADER.** RGB frames can be ordered by
 the `+20` counter and nothing else. Any RGB↔IMU alignment must come from host arrival
 time plus the assumption that the counter is gap-free — and it is not gap-free:
 RGB exact-gap framing is 60–77 % in the all-four recipe (`docs/10` §10.5), so the
@@ -105,6 +105,30 @@ counter skips.
 
 This is the answer to the Phase 1 question, and it is a negative one: **there is no
 single device clock that covers RGB.**
+
+### 16.3.1 That conclusion is withdrawn — the driver puts the timestamp in the trailer
+
+`docs/09-driver-decompiled.md`, from `Meta.Driver.EndPointDataProcessors/DataScanner.cs`, defines a
+**32-byte trailer present on all endpoints**, and the driver names a 64-bit timestamp inside it:
+
+```
++0  TimeStampHi         +4  TimeStampLow
++8  SentinelHi          +12 SentinelLow
++16 FixedSentinelHi     +20 FixedSentinelLow
++24 PacketInformationHi +28 PacketInformationLow
+IsHeader  = (PacketInformationLow & 0x01000000) != 0
+PacketNum = PacketInformationLow & 0xFFFFFF
+```
+
+`FindTrailerIndex` searches `EF BE AD DE 0D F0 DD DA 00 00 00 00` and returns `i − 16`, and
+`RGBEndPointDataProcessor` **finalises a frame when it reaches a trailer** — the trailer follows the
+image data. So RGB does have a per-frame device timestamp; §16.3 swept only the 32 bytes at the
+*start* of the record. Same driver source gives the mono header its own timestamp-like field at
+`h+4` (observed `0xD0B254DF`).
+
+`[VERIFIED]` that the driver defines these fields. `[UNMEASURED]` whether the trailer's
+`TimeStampHi/Low` is one coherent time base across EP `0x81`/`0x82`/`0x83`. That, not the stall
+experiment, is the next measurement.
 
 ## 16.4 The mux timestamp is neither clock nor counter
 
