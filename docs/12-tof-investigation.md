@@ -1609,3 +1609,52 @@ Next experiment this points at: pad the truncated writes using the device's own 
 the vendor's exact widths, and test the single success metric (hand at 10 cm vs 1 m). If the four
 `0xc3xx` blocks are modulation parameters, completing them is the most direct remaining shot at the
 missing use case.
+
+### 12.40 WITHDRAWAL: the arm was never truncated — `wIndex` was decimal parsed as hex
+
+§12.39's central claim is **withdrawn**. Re-reading the original capture frame by frame with tshark:
+
+| frame | register | true `wIndex` = `wLength` | `ctrl_seq_full.json` said |
+|---|---|---|---|
+| 257 | `0xb062` | 20 | 32 |
+| 269 | `0xa893` | 22 | 34 |
+| 305 | `0xa882` | 12 | 18 |
+| 353 | `0xb00e` | 24 | 36 |
+| 503 | `0xc35e` | 14 | 20 |
+| 515 | `0xc363` | 14 | 20 |
+| 527 | `0xc368` | 14 | 20 |
+| 539 | `0xc36d` | 14 | 20 |
+| 617 | `0xbff8` | 20 | 32 |
+| 701 | `0xa886` | 12 | 18 |
+| 749 | `0xc2bc` | 44 | 68 |
+| 761 | `0xc352` | 16 | 22 |
+
+`[VERIFIED]` — `Data Fragment` in every frame is byte-identical to the payload in
+`ctrl_seq_full.json`. **The payloads were never truncated.** Only `wIndex`/`wLength` are wrong.
+
+Root cause is in our own tooling, and it was already written down in the code:
+`re/ir4_build_arm.py` line 81 — `# tshark's DECIMAL-formatted output, so wIndex = int(str(true_value), 16).`
+tshark printed those fields in decimal and the arm builder parsed them as hex:
+`12 -> 0x12 = 18`, `14 -> 0x20`, `16 -> 0x22`, `20 -> 0x32`, `22 -> 0x34`, `24 -> 0x36`, `44 -> 0x68`.
+Every "missing 6/12/24 bytes" in §12.39 is exactly that conversion. `[VERIFIED]`
+
+**IR-79 tested whether it matters.** `re/ir79_exact_arm.py` produced `re/ctrl_seq_fixed.json` with the
+13 `wIndex` values corrected, then alternated ORIGINAL / FIXED arms for two rounds each.
+
+    original mean 2035.73 (within-pair drift 0.09)
+    fixed     mean 2035.64 (within-pair drift 0.18)
+    delta fixed - original = -0.09 counts; drift ceiling 0.18
+    => EP 0x84 unchanged within drift
+
+`[VERIFIED]` So the `wIndex` bug is **cosmetic for EP `0x84`**: pyusb derived `wLength` from the
+payload, which was always correct, and the device ignored the inflated `wIndex`. Our arm is faithful
+for the depth endpoint. The missing measuring state is not a wire-fidelity problem.
+
+Gate defect found in the same run, recorded: the healthy-control gate required `ep82 >= 5 MB/s`, and
+`ep82` sat at `0.16-0.18 MB/s` in 11 of 12 passes (mono cameras simply are not streaming in this
+session), so every pass was flagged "starved" even though `ep84` was healthy at `9.7-11.0 MB/s`
+throughout. `[VERIFIED]` Gate must be per-endpoint and named explicitly, not a blanket AND.
+
+What survives from §12.39: the rolling-window behaviour of the control IN endpoint (the `0xb062`
+length matrix), and the observation that reading wider than you wrote recovers device-side words.
+`[VERIFIED]`

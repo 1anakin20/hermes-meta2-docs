@@ -1721,3 +1721,18 @@ bytes). That was the wrong IN length, not a device restriction. `[VERIFIED]`
 
 Open: whether completing the truncated blocks — especially the four `0xc3xx` blocks — puts the imager
 into a modulation use case. `[OPEN]`
+
+## 38. Withdrawal of §37's truncation claim; arm payloads were always byte-exact (2026-10-25)
+
+Withdrawn: "13 wide writes in the reference arm are truncated; the device has been receiving short
+versions for the whole investigation." `[WITHDRAWN]`
+
+Corrected fact: payloads are byte-exact; `wIndex`/`wLength` in `ctrl_seq_full.json` are inflated for
+those 13 rows because `ir4_build_arm.py` parsed tshark's decimal output as hex. `[VERIFIED]` against
+the original pcap frame by frame.
+
+IR-79: with `wIndex` corrected, EP `0x84` mean moved `-0.09` counts against a `0.18`-count drift
+ceiling. The deviation is cosmetic for the depth endpoint. `[VERIFIED]`
+
+Net effect on the investigation: wire fidelity is not the missing ingredient. `[VERIFIED]` for EP
+`0x84`; the search for the measuring state continues elsewhere.
