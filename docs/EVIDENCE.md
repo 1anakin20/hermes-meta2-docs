@@ -1780,7 +1780,13 @@ camera, in a window that was the first arm sequence. Not reproduced in a steady-
 Practical effect today: removing `meta2_feed_disable()` from any keep-alive loop raises mono from
 8.5 to 31.7 complete frames/s per camera. `[VERIFIED]`
 
-### The cadence that actually fixes it
+### The cadence that appeared to fix it
+
+`[SUPERSEDED]` by §40. The table below is real for the configuration it was measured in, but that
+configuration read only EP `0x82` + `0x83` and parsed mono inline, and the tool's window measurement
+was wrong (it reported 13.0 s for a 10 s capture because the readers kept running through the joins).
+With the window fixed and the endpoint set varied, assert cadence turned out to be worth a few
+percentage points, not 40x. See §40.
 
 Asserting as fast as possible is itself the problem: a fresh assert lands while a frame record is
 still in flight and the device truncates that record. Spacing the asserts by more than a few frame
@@ -1809,3 +1815,61 @@ whole. `[VERIFIED]`
 Earlier runs in this section understated throughput because the reader's ring buffer was smaller
 than the stream and silently dropped 124-564 MB; those rows are superseded by the table above.
 `[CORRECTED]`
+
+## 40. RGB completeness measured, and the variable that actually dominates (2026-10-25)
+
+`examples/meta2_capture_live.c` arms once, keeps the feeds alive at a set cadence, reads a chosen
+set of endpoints concurrently, holds the whole window in RAM, and analyses afterwards. Nothing is
+parsed during capture, so no CPU work sits in the drain loop. Every run below reports
+`host dropped bytes = 0` on every endpoint.
+
+RGB completeness = the gap between consecutive 32-byte frame records (`MAGIC baabedfe`) being exactly
+`META2_EP83_FRAME_BYTES` = 1,843,232 B. Same test `analyze_capture.py` used for the 99.7% figure, so
+the method is not the difference. False-positive expectation for a 4-byte magic across a whole
+capture is ~0.2 hits, so the short gaps are real records, not noise.
+
+queue 8, read_size 65536, interval 150 ms, 10 s windows:
+
+| endpoints drained | RGB exact gaps | RGB MB/s | mono exact frames | mono complete fps/camera |
+|---|---|---|---|---|
+| `0x82+0x83` | **68.7%** (160 of 233) | 41.7 | 74.6% | 34.6 |
+| `0x81+0x82+0x83` | **19.2%** (98 of 511) | 48.7 | 25.2% | 25.5 |
+| `0x82+0x83+0x84` | **13.2%** (95 of 722) | 43.8 | 16.9% | 18.7 |
+| `0x81+0x82+0x83+0x84` | **15.0%** (98 of 652) | 46.0 | 12.8% | 18.6 |
+
+**The number of endpoints drained at once is the dominant variable.** Adding EP `0x81` or EP `0x84`
+to the reader set collapses completeness on the endpoints that matter. `[VERIFIED]`
+
+Things that were measured and are NOT the variable, each worth only a few points in the
+`0x82+0x83` configuration:
+
+- assert cadence: 0 ms -> 71.9% mono, 150 ms -> 72.0%, 200 ms -> 74.6%
+- drain pacing: greedy 72.0% vs paced 62.5% / 65.8%
+- queue depth: 1 vs 8 -> 55.1% vs 55.2% (from §39)
+- read_size: 16 KB -> 58.8%, 64 KB -> 72.0%, 256 KB -> 72.0%, 1 MB -> 74.4% mono but RGB
+  completeness fell to 52.6% with 66 long gaps `[VERIFIED]`
+
+**The documented RGB framing figure does not reproduce.** `docs/14-project-state.md` §2 and
+`docs/15-shipping-plan.md` §1 carry 99.7% framing at 95.57 MB/s from `probe3`. No configuration run
+here reached above 76.7%, and every configuration that drains the mux or the depth endpoint lands at
+13-21%. `[VERIFIED]` for the new numbers; the 99.7% is `[UNREPRODUCED]` rather than `[WITHDRAWN]` -
+`probe3` was a different capture and its file is still on disk.
+
+### Two library bugs found while measuring
+
+1. `ACC_CAP` in `src/mono.c` was one frame record + 16 KB, i.e. 4 fragments of headroom. The
+   longest mono gap actually produced is 3,311,264 B (1.8 frame records), so `append()` overflowed,
+   discarded the whole per-camera accumulator and counted one resync - about 722 KB of one camera's
+   stream lost per occurrence, invisible in any byte count. Raised to 4 frame records; resyncs went
+   18-38 -> 0 and mono completeness rose 2-3 points. `[VERIFIED]`
+2. `meta2_mono_live` measured its window after the reader joins and the final drain, so it reported
+   13.0 s for a 10 s capture and its MB/s and fps were understated and non-comparable. Fixed in
+   `meta2_capture_live` by closing the window before stopping the readers. `[VERIFIED]`
+
+### Open
+
+`[OPEN]` Why draining more endpoints truncates the records on the others. Two candidate shapes: a
+shared device-side throughput budget that gets divided, or a shared FIFO whose occupancy depends on
+how quickly every endpoint is serviced. Nothing measured so far separates them - aggregate bytes are
+41-49 MB/s across all four configurations, which is consistent with a budget but does not prove one.
+`[OPEN]` Whether `probe3`'s 99.7% is reproducible at all.

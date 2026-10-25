@@ -28,6 +28,13 @@ document is the corrected one and the disagreement is called out.
 ~55 MB/s window gives; the device reaches **~52 fps at 95.6 MB/s with 99.7% framing**. The rate
 tracks bus load, so it is a bandwidth question, not a camera setting. `[MEASURED]`
 
+`[CORRECTED 2026-10-25]` the 99.7% framing figure above is from `probe3` and **does not reproduce**.
+Measured fresh with `examples/meta2_capture_live.c`, RGB exact-gap framing is 68.7% when only EP
+`0x82`+`0x83` are drained and 13-21% when EP `0x81` or `0x84` are drained alongside it, at 41-49
+MB/s. The dominant variable is how many endpoints are drained at once. See `docs/EVIDENCE.md` §40.
+`probe3` itself is `[UNREPRODUCED]`, not disproved - its file is still on disk. Until that is
+settled, quote RGB framing as **68.7% best case measured**, not 99.7%.
+
 `[VERIFIED]` framing: 32-byte record + 1,843,200 B payload (1280×720×2), record-delimited, counter
 u32 at record+20 advances +1 per frame. `meta2_find_frames` implements it; `burst83.bin` gives
 `frames=74 monotonic=1`.
