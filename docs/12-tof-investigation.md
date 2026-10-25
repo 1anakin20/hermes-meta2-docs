@@ -1813,3 +1813,54 @@ values in this log.
 `royale_recording_filename=ir75_tof.rrf`, `enable_depth=true` all returned `True` post-start, yet
 `recordings.txt` says `rrf_found=0` and the probe logged "no .rrf recording produced". Pre-start the
 same calls threw. `[VERIFIED]`
+
+### 12.44 — v9: the device-layer proxy on `meta2_host_impl.dll`
+
+Built from the §12.43 finding. Generator: `re/proxy_gen2.py`. Export dumper: `re/pe_export_dump.py`
+(`IMAGE_EXPORT_DIRECTORY` field order matters: Name +12, OrdinalBase +16, NumberOfFunctions +20,
+NumberOfNames +24, AddressOfFunctions +28, AddressOfNames +32, AddressOfNameOrdinals +36 — and the
+three tables are RVAs that must be converted to file offsets before indexing).
+
+**Measured export surface.** Vendor `meta2_host_impl.dll`: 2896 exports, 0 forwarded, all named.
+Proxy: 2896/2896 name+ordinal pairs identical (`pe_export_dump.py` set-diff, zero missing, zero
+extra). Semantic device commands confirmed exported, with RVAs:
+
+| export | ordinal | RVA |
+|---|---|---|
+| `Connect@SAQDriverManagerAdapterCls@sdc` | 1483 | `0x1f170` |
+| `Disconnect@SAQDriverManagerAdapterCls@sdc` | 1504 | `0x1fdf0` |
+| `GetAnalogGain@…` | 1507 | `0x20360` |
+| `GetExposure@…` | 1509 | `0x20480` |
+| `ReadFromSPIMemory@…` | 1521 | `0x20b80` |
+| `ReadI2C@…` (3 overloads) | 1522–1524 | `0x20bb0`, `0x20c40`, `0x20d30` |
+| `SetAnalogGain@…` | 1573 | `0x215e0` |
+| `SetExposure@…` | 1575 | `0x217f0` |
+| `SetGPIO@…` | 1576 | `0x21950` |
+| `WriteI2C@…` (3 overloads) | 1591–1593 | `0x22610`, `0x226c0`, `0x22770` |
+| `WriteToSPIMemory@…` | 1596 | `0x22980` |
+| `ConfigureLed@InitConfigImpl@sdc` / `@SAQDriverManagerAdapterCls@sdc` | 1469 / 1470 | `0x2dd90` |
+
+Class census in the export table: `SAQDriverManagerAdapterCls` ×59, `SAQBigBufferCls` ×58,
+`SAQFrameCls` ×44, `SAQUSBCls` ×25, `SAQBMHCls` ×21, `SAQEndPointCls` ×11, `SAQEndPoint0Cls` ×9.
+`SAQUSBCls` is the USB layer inside this module.
+
+**Forwarding design (the part that was wrong before).** Every stub is generated assembly: save
+`rcx/rdx/r8/r9` into callee-saved registers, capture the entry `rsp`, call the logger with
+`(idx, a1..a4, entry_rsp)`, restore the four argument registers and the exact entry `rsp`, then tail
+`jmp` to the real export. A tail `jmp` is the only form correct for arbitrary C++ signatures,
+because the real function's stack arguments are already positioned relative to the entry `rsp`. A
+C-level forwarder with a fixed argument list is what produced the garbage `BULK len=140733769033208`
+lines in the cyapi log, and would corrupt any call with more than four parameters or with
+floating-point parameters. Consequence, stated up front: **return values are not captured.**
+
+Logging: `M2_IMPL_LOG` env override, default `<proxydir>\meta2_impl_calls.log`; per-export counters;
+first 200 calls of any export logged in full, then 1 in 64, so a frame-rate export cannot fill the
+disk while call counts stay exact. Each logged call dumps up to 32 readable bytes of each argument
+plus three stack-argument slots.
+
+**Package.** `meta2_win_probe_v9.zip`, 593,426 B, sha256
+`53230e5cf1650fd0de335012957e4c69f772298e63580d2e8621297998fdd150`, 24 members, `testzip()` clean.
+`run_all.bat` now installs both proxies, gates on both self-tests, harvests `meta2_impl_calls.log`,
+and restores both genuine DLLs on every exit path. `impl_selftest.exe` deliberately calls **no**
+export — calling `meta2_host_impl` without a connected headset can crash — and instead proves the
+proxy loads, the genuine DLL is staged at `real\`, and all 2896 exports resolved.
