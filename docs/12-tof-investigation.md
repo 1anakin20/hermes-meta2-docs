@@ -1658,3 +1658,55 @@ throughout. `[VERIFIED]` Gate must be per-endpoint and named explicitly, not a b
 What survives from §12.39: the rolling-window behaviour of the control IN endpoint (the `0xb062`
 length matrix), and the observation that reading wider than you wrote recovers device-side words.
 `[VERIFIED]`
+
+### 12.41 — IR-80: first real-device run of the `cyapi.dll` proxy logger (v6 package)
+
+Upload: `m2out3_LAPTOP-DC9899IK_20261025_122530.zip` (19,621 B, 19 members, zip intact),
+extracted to `re/ir80_win/run1/`.
+
+**Measured — the proxy works.** `cyapi_calls.log` (1,248 B) contains three real intercepted calls
+from `royale.2.3.1.dll` against the physical headset:
+
+| time | export | ordinal | result |
+|---|---|---|---|
+| 12:24:04.712 | `??0CCyUSBDevice@@QEAA@PEAXU_GUID@@H@Z` | 29 | constructed with GUID bytes `92BBA85A A4309D44 B94E5B99 5E862939` |
+| 12:24:04.712 | `?DeviceCount@CCyUSBDevice@@QEAAEXZ` | 41 | returned `1` |
+| 12:24:29.263 | `?Open@CCyUSBDevice@@QEAA_NE@Z` | 100 | returned `1` (opened) |
+
+The GUID the SDK passes to `CCyUSBDevice` is **not** the `MetaSAQ.inf` class GUID
+`{bb0697e3-…}`; it is `92BBA85A-A430-9D44-B94E-5B995E862939` (byte order as dumped). That is a
+named fact for the no-SDK path: the vendor opens the device through a different interface class.
+
+**Measured — the probe reached the healthy state and then died.** `probe_log.txt` shows
+`HEALTHY dev=4 conn=1 streams=4080` at 38.7 s — the same signature as the IR-74 healthy run —
+but `stats.csv` contains only 4 poll rows (37–38 s) and `run_stamp.txt` says the process finished
+at 43.6 s against a 420 s request. No `stop requested` line, no `FAILURE.txt`, and the proxy's
+`=== proxy unloading ===` trailer is absent. Inference (strong): the process was killed by an
+uncatchable fault (AccessViolation-class) inside poll 5, between the healthy log line and the
+stats write, i.e. inside `meta_get_point_cloud`, `meta_get_reconstruction_mesh`, or the
+disassembly-derived eye/stencil/render-target getters. Not yet identified.
+
+**Measured — the SDK accepted the raw-ToF recording request.** `attributes.csv`:
+`post-start,DeviceStreamBlock,enable_royale_recording,true,True`,
+`royale_recording_filename=ir75_tof.rrf,True`, `enable_depth=true,True`. No `.rrf` was produced
+because the process died before any frame was recorded. This is the first time the vendor SDK has
+acknowledged a raw-recording request on physical hardware.
+
+**Measured — the user's install path** is `C:\Program Files\Meta\Meta SDK2 Beta\bin` (a `Meta`
+subfolder), not `C:\Program Files\Meta SDK2 Beta\bin`.
+
+**Tooling notes.** (a) The proxy's bulk heuristic mislabels exports that have no length argument:
+`DeviceCount` and `Open` were logged as `BULK len=140734241089016` (garbage read of a non-length
+argument). Cosmetic; the call and return value are still correct. (b) `META_RECORDING=(none)` in
+`paths.txt` is not a packaging bug — the probe reads it through `get_meta_variable`, and the SDK
+does not expose it as a `MetaVariable`; `run_all.bat` does set the process environment variable.
+(c) No `glog` files were harvested; with the process dying abnormally, glog output was not
+flushed to `GLOG_log_dir`.
+
+**v7 changes made in response.** `MetaProbe.cs` now defaults to **safe mode**: the
+disassembly-derived getters (eye depth stencil, stencil texture, eye texture, render-target view,
+graphics context/device, render-target width/height) are skipped unless `--full` is passed. Every
+risky call is now preceded by a flushed `CANARY -> <name>` line, and each poll starts with
+`CANARY -> poll N phase=<phase>`, so a future crash names the exact call that caused it from a
+machine we are not sitting at. Package: `meta2_win_probe_v7.zip`, 244,821 B,
+sha256 `28f7fd6ad75e88ca71dd69f48af82e1fac929a7efcbc1ff723f74f8c7e35b951`.
