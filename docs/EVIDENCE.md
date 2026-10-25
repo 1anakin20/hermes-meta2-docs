@@ -1689,3 +1689,17 @@ awaits IR-76 rev 2 running on the device.
 
 Also recorded, because it is a latent trap: 32 of 138 OUT entries have payload shorter than recorded
 `wLength`, and our harness sends `wLength = len(payload)`. `[VERIFIED]`
+
+## 36. modPLL is LOCKED under the host-only arm; unlocked-fallback theory withdrawn (2026-10-25)
+
+`0x9802 = 0x0001` at arm index 141, stable across repeats; bit `0x04` clear. `0xc40f = 0x0000`.
+`0xb0ad = 0x0a12`, matching Royale's required design step exactly. `[VERIFIED]`
+
+Withdrawn: the proposal that EP `0x84`'s fixed pattern is an unlocked-PLL fallback. The vendor's own
+lock-failure test is false in our session. `[VERIFIED]`
+
+Not withdrawn, and still the open question: a modulation *use case* / exposure command that our arm
+never issues. `[OPEN]`
+
+Invalid number, do not reuse: `control_drift_counts = 3.67` from `re/ir76_modpll` — the first control
+pass was starved (`ep84 0.48 MB/s`), so the two controls are not comparable. `[VERIFIED]` defect.

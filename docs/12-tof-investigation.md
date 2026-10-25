@@ -1486,3 +1486,58 @@ hands the payload bytes to `ctrl_transfer`, so pyusb sends `wLength = len(payloa
 keeps the recorded value. The arm works anyway, but our wide transfers are **not** byte-identical to
 the vendor's. `[VERIFIED]` about our own harness; the consequence is unquantified and is the first
 thing to re-examine if a wide-register experiment ever looks inconsistent.
+
+### 12.38 IR-76 rev 2 executed on the device — the modPLL reports LOCKED
+
+Device re-attached to server3 (`Bus 004 Device 002: ID 2cfa:00f3 USB Design By Meta Meta2`,
+`/sys/bus/usb/devices/4-1/speed = 5000` → SuperSpeed gen-1, so the SDK's SuperSpeed gate is
+satisfied on this port). `[VERIFIED]`
+
+Ran `re/ir76_modpll_state.py` with the venv interpreter (`/home/hermes/work/metavision/venv/bin/python`;
+system `python3` has no pyusb). Arm replayed byte-for-byte; the 19 already-paired INs collected; each
+target read repeated, all values stable across repeats.
+
+| register | captured value | repeats | vendor meaning |
+|---|---|---|---|
+| `0x9802` | **`0x0001`** | 2/2 identical | bit `0x04` **CLEAR** → modPLL **locked** |
+| `0xb0ad` | `0x0a12` | 2/2 | exactly the value Royale requires (`wrong design step` otherwise) |
+| `0xb09e` | `0x0670` | 6/6 | bit `0x4` clear |
+| `0xb062` | `a3c3 5568 0000 0000 0000 0000 aaaa 032a` | 2/2 | verbatim echo of the `0x20` burst write at arm index 36 |
+| `0xb007` | `0x0180` | 8/8 | verbatim echo of the arm's masked write |
+| `0xc401` | `0x0002` | 4/4 | last arm write (`=2`) stuck |
+| `0xc400` | **`0x0000`** | 4/4 | arm writes `1` at indices 132 and 315, yet reads back `0` |
+| `0xc402` | `0x0018` | 4/4 | arm writes `0x0040` then `0x0000`; reads back `0x18` |
+| `0xc40d` | `0x8012` | 2/2 | verbatim echo |
+| `0xc40f` | `0x0000` | 4/4 | bit `0x4000` clear → Royale's `iSM inactive` throw would not fire |
+
+All statuses `00`. `[VERIFIED]` raw responses in `re/ir76_modpll`.
+
+**Decisive in one direction:** the "EP `0x84` is an unlocked-PLL fallback pattern" explanation is
+**dead**. The vendor's own lock-failure condition (`0x9802 & 0x04`) is **false** in our host-only
+session, and `0xc40f` shows no iSM fault. So the fixed EP `0x84` pattern coexists with a *locked*
+modulation PLL. What is missing is not a lock and not a register write that failed to land — it is a
+use-case / exposure command that never gets issued. `[VERIFIED]` for the register state; `[INFERRED]`
+for what that implies about the missing command.
+
+`0xb0ad == 0xa12` is independently strong: our arm is driving the imager at the design step Royale
+asserts for this part, and the burst/table writes echo verbatim. The register path is not the broken
+part. `[VERIFIED]`
+
+Two anomalies worth carrying, both measured, neither yet explained:
+1. `0xc400` reads `0x0000` at both read sites even though the arm writes `1` twice. Either it is a
+   self-clearing apply/strobe bit, or writes there are ignored. `0xc401` in the same family *does*
+   latch (`0x0002`), so "writes don't stick" is not a general explanation. `[VERIFIED]`
+2. `0xc402` reads `0x0018` after writes of `0x0040` then `0x0000` — not a latch; behaves like a
+   status register. `[VERIFIED]`
+
+Methodology defect found in this run, recorded rather than hidden: the **first** control pass was
+degenerate — `ep84 = 0.48 MB/s`, `n = 1,212,685`, `ep82 ≈ 0` — i.e. it never reached the healthy
+armed state, while the second control was healthy (`ep84 = 9.08 MB/s`, `n = 22,716,938`,
+`mean 2035.94`, `sd 145.80`). Therefore the printed `control-to-control drift = 3.67 counts` is
+**not a valid drift estimate** and must not be used as a significance threshold. Next probe must
+re-arm until the control is healthy before bracketing. `[VERIFIED]`
+
+Also observed: during the byte-for-byte replay, many *non-target* IN slots returned
+`[Errno 32] Pipe error` (arm indices ~293 onward). The target reads all succeeded. Consistent with
+the harness `wLength` caveat in §12.37 — our wide OUTs are not byte-identical to the vendor's, so the
+device does not arm every IN the vendor armed. `[VERIFIED]` that it happened; `[INFERRED]` as to why.
