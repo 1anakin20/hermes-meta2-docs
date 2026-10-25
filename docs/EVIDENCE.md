@@ -1779,3 +1779,33 @@ camera, in a window that was the first arm sequence. Not reproduced in a steady-
 
 Practical effect today: removing `meta2_feed_disable()` from any keep-alive loop raises mono from
 8.5 to 31.7 complete frames/s per camera. `[VERIFIED]`
+
+### The cadence that actually fixes it
+
+Asserting as fast as possible is itself the problem: a fresh assert lands while a frame record is
+still in flight and the device truncates that record. Spacing the asserts by more than a few frame
+periods lets each record finish. Same binary, same arm, queue 8, mask `0x7e` / mux `0x1b`, EP
+`0x82`, 10 s windows, host dropped 0 bytes:
+
+| assert interval | EP `0x82` | complete frame records | complete fps/camera |
+|---|---|---|---|
+| as fast as possible | 48.9 MB/s | 919 of 1585 = 58.0% | 26.1 |
+| every 80 ms | 0.07 MB/s | 0 of 3 | endpoints never started |
+| every 120 ms | 51.3 MB/s | 911 of 915 = **99.6%** | 35.1 |
+| every 200 ms | 51.5 MB/s | 912 of 915 = **99.7%** | 35.3 |
+
+`[VERIFIED]` — this reproduces the 99.8% that had previously only been seen inside the first arm
+sequence, in a steady-state window.
+
+The cadence is not monotonic: 40 ms and 80 ms each produced a run where the endpoints never started,
+same binary, same arm. The working range found so far is >= ~120 ms. `[OPEN]` why the intermediate
+values fail.
+
+Library side: `meta2_feed_keepalive()` (interval 150 ms default) implements this, and
+`examples/meta2_mono_live.c` measures it end to end through `meta2_mono_feed`. Mono went from
+**8.5 -> 35.3 complete frames/s per camera**, and from 12.4% -> 99.7% of frame records arriving
+whole. `[VERIFIED]`
+
+Earlier runs in this section understated throughput because the reader's ring buffer was smaller
+than the stream and silently dropped 124-564 MB; those rows are superseded by the table above.
+`[CORRECTED]`
