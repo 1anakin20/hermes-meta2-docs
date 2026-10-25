@@ -226,3 +226,47 @@ relative to that offset. A parser that indexes by `offset % 256` misreads the wh
 file. Header magic search with tag and trailer validation (as in `meta2_mux_find`) is
 the correct framing method; it also rejects the four stray magic hits that appear in
 that file at spacings of 16 and 252.
+
+## 13.11 EP 0x81 runs in three modes, and the timestamp span tells them apart (2026-10-25)
+
+Nine runs of the all-four-endpoint recipe from `docs/10` §10.5 (queue 8, read_size 65536, mask
+`0x7e`, mux `0x1b`, warm `0x7e`, fast sustain, 8 s windows). `meta2_mux_find` framing; **zero**
+records byte-identical to the previous one in any run, so the high-rate modes are not re-sent
+packets. `[VERIFIED]`
+
+| records | IMU0/s | IMU1/s | counter span | timestamp span | ticks/record |
+|---|---|---|---|---|---|
+| 2403 | 147.4 | 150.5 | 1431 | 1478.3 M = 183.3 MHz | 615 k |
+| 2984 | 183.5 | 189.3 | **2** | 0.59 M = 0.07 MHz | 199 |
+| 3043 | 188.4 | 191.8 | **1** | 0.59 M = 0.07 MHz | 195 |
+| 2120 | 130.4 | 130.7 | 1464 | 1499.1 M = 184.7 MHz | 707 k |
+| 2139 | 130.3 | 132.0 | 1325 | 1502.3 M = 184.3 MHz | 703 k |
+| 2750 | 168.5 | 170.7 | 1447 | 1476.6 M = 182.1 MHz | 537 k |
+| 377 | 23.1 | 23.8 | 376 (monotonic) | 56.9 M = 7.08 MHz | 151 k |
+| 377 | 23.4 | 23.7 | 376 (monotonic) | 56.4 M = 7.05 MHz | 150 k |
+| 379 | 23.4 | 23.7 | 378 (monotonic) | 56.9 M = 7.08 MHz | 151 k |
+
+IMU0 and IMU1 counts are within 2% of each other in **every** run, so a slow run is not a dropped
+tag — both sensors slow together. `[VERIFIED]`
+
+Three modes:
+
+1. **Healthy** — 2100–2750 records, timestamp span 182–185 MHz × the window. Read as a ~183 MHz
+   device clock, the span covers 8.0–8.2 s, i.e. the whole window. IMU rate **~130–171 Hz per
+   sensor**. This is the mode a tracking front end needs.
+2. **Starved** — 377–379 records, counter strictly +1, timestamp span 7.05–7.08 MHz. At 183 MHz
+   that is 0.31 s of samples delivered into an 8 s window: the endpoint got ~4% of its data.
+3. **Frozen** — ~3000 records, counter span 1–2, timestamp span 0.07 MHz = 3.2 ms of samples.
+   Thousands of distinct records that all carry almost the same timestamp and counter. `[OPEN]` what
+   produces this; it is not duplication (0 identical records) and it is not a plausible sample rate.
+
+**The clock.** Mode 1 gives 182.1–184.7 MHz across four independent runs, agreeing to 1.4%, and it
+lands inside the 172–205 MHz band that `docs/15` §3 inferred from captures where EP `0x83`/`0x84`
+also stream. `[INFERRED]` that ~183 MHz is the device clock and that modes 2 and 3 are the endpoint
+delivering a fraction of a window rather than a slower clock — modes 2 and 3 are self-consistent at
+any clock, so the clock value is not independently pinned by them. The `~120.8 MHz` figure in §13.7
+and the `~1.2e8` comment in `include/meta2/mux.h` are both superseded.
+
+**Health gate for a tracking session:** do not count bytes — divide the mux timestamp span by the
+window. A span near 183 MHz × window means the IMU stream is real; anything near 7 MHz or 0.07 MHz
+means the session is starved and should be re-armed. Byte counts alone cannot tell mode 3 from mode 1.
