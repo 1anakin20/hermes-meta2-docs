@@ -1,5 +1,11 @@
 # 12. ToF / EP 0x84 investigation (E4)
 
+> **PAUSED 2026-10-25 by user decision — not closed.** The library ships without ToF; tracking
+> moves to the mono + RGB + IMU path. The exact resume point, the leading hypothesis (five arm
+> transfers whose payloads were never captured), the ready-made instrument (v10 wire-payload proxy)
+> and the IR-84 decision rule are in **[docs/HANDOFF.md](HANDOFF.md) §4**. Nothing here is superseded;
+> read §12.45–§12.46 last for the current state.
+
 Status: **the ToF endpoint streams, is fully calibrated, and is not missing any command we
 could send — but it carries no range data, and neither does the vendor SDK.** The IR emitter
 **is** active, and it is gated on the vendor SDK running (§12.7). The five commands the

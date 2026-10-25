@@ -9,20 +9,35 @@ and build their own software for it.
 > `idVendor 0x2CFA "USB Design By Meta"`, `idProduct 0x00F3 "Meta2"`. The name
 > collision is unfortunate; the device has nothing to do with Facebook hardware.
 
+## Start here
+
+**[docs/HANDOFF.md](docs/HANDOFF.md)** is the current resume point: what is done and shippable,
+what the ToF branch proved, where it stopped, and the exact next experiment if ToF is picked up
+again. Read it before anything else.
+
 ## Status
 
 The device is understood down to the wire level: USB identity, endpoint map, the
 vendor control protocol, a register map with live read-backs, and the framing of the
 bulk data streams. A no-SDK client (plain libusb, Linux, no Meta SDK, no Windows, no
-vendor driver) has been demonstrated reading the device.
+vendor driver) reads the device continuously — the arm sequence plus a four-command
+strobe sustains full-rate streaming across all four bulk endpoints (~163 MB/s aggregate).
 
-**Not yet solved:** the command that switches the device from single-burst output to
-continuous full-frame streaming. See [docs/07-open-questions.md](docs/07-open-questions.md).
+The library exists: **`meta2lib`** (`github.com/1anakin20/meta2lib`), C11 + system libusb,
+nothing vendored, implementing EP `0x81` (IMU + audio mux records), `0x82` (two 752×480 10-bit
+mono cameras), `0x83` (YUV422 1280×720) and `0x84` (352×288 16-bit ToF framing).
+
+**Not solved:** the ToF camera produces no scene range data in any path tried so far — host-only
+arm, VM SDK, and physical PC SDK. Investigation paused 2026-10-25 with a concrete lead
+(five arm transfers whose payloads were never captured); see [docs/HANDOFF.md](docs/HANDOFF.md) §4
+and [docs/12-tof-investigation.md](docs/12-tof-investigation.md) §12.46.
+
+Other open items are listed in [docs/07-open-questions.md](docs/07-open-questions.md).
 
 ## What this repo is
 
-Documentation only. A separate library repo is planned once the device is fully
-understood. Code appears here only where it is needed to make a mechanism unambiguous.
+Documentation and evidence. Code appears here only where it is needed to make a mechanism
+unambiguous; the shippable code lives in `meta2lib`.
 
 ## Confidence convention
 
