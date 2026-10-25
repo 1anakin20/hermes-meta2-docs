@@ -1446,3 +1446,43 @@ register primitive we already control. IR-77 should replay `0xb007` masked write
 working arm, bracketed by unmodified-arm controls, and test the single success metric: does EP `0x84`
 become scene-responsive (hand at 10 cm vs 1 m) under a fixed arm? IR-76 (read `0x9802` under the
 current arm) runs first and costs one session.
+
+### 12.37 The arm already replays the vendor imager-init sequence — the gap is a captured answer, not a missing command
+
+Cross-checking the Ghidra results against `re/ctrl_seq_full.json` index by index:
+
+| arm index | transfer | vendor equivalent in `royale.2.3.1.dll` |
+|---|---|---|
+| 0 / 114 / 393 | `3d 40 b007 0180` | `maskedWriteRegister(0xb007, ...)` |
+| 324 | `3d 40 b007 0040` | the other masked-write branch |
+| 36 | `3d 20 b062 a3c3 5568 ...` | `writeImagerBurst(0xb062, vector<ushort>)` |
+| 39 | `3d 21 b062 ff...` | `readImagerBurst(0xb062, ...)` |
+| 126 / 183 | `3d 40 c401 0001` / `3d 40 c401 0002` | `writeImagerRegister(0xc401, 1)` then `(0xc401, 2)` |
+| 132 / 315 | `3d 40 c400 0001` | `writeImagerRegister(0xc400, 1)` |
+| 138 / 321 | `3d 21 c40f ffff` | `readImagerRegister(0xc40f)` |
+| **141** | **`3d 21 9802 ffff`** | **`readImagerRegister(0x9802)` — the modpll lock check** |
+| 189 | `3d 40 c40d 8012` | `writeImagerRegister(0xc40d, 0x8012)` |
+| 195 / 222 | `3d 40 c402 0040` / `3d 40 c402 0000` | vendor writes both |
+| 30 | `3d 21 b0ad ffff` | must read `0xa12` else `wrong design step` |
+| 33 / 228 / 240 | `3d 21 b09e ffff` | bit `0x4` selects `imager+0x228 = 0xb00079` |
+
+`[VERIFIED]` — both sides read from artifacts, not inferred.
+
+Consequence, and it is a real reframe: **the missing thing is not a wire command.** Our arm already
+issues the vendor's modulation-PLL register writes and already *arms a read of the vendor's own lock
+status register at arm index 141*. We have simply never collected the answer. IR-76 rev 2 does
+exactly that: it replays the arm byte-for-byte, collects the 19 already-paired INs for
+`0x9802, 0xc40f, 0xb0ad, 0xb09e, 0xc401, 0xc400, 0xc40d, 0xc402, 0xb062, 0xb007`, repeats them twice
+more for stability, and brackets the pass with two no-capture controls. Nothing is inserted or
+appended, so the arm stays byte-identical to the one that produces the reproducible EP `0x84` pattern.
+
+Opcode families in the arm, counted rather than assumed: `0x21` read ×70, `0x40` write ×32,
+`0x60` wide write ×3, `0x20` burst write ×2, `0xa0` ×3, `0xc0` ×5, `0xe0` ×1. The `0x20` family is
+the burst-write family and the `0x60` family is the wide-table family. `[VERIFIED]`
+
+Harness caveat that must not be quietly carried: 32 of the 138 OUT entries have a recorded payload
+shorter than their recorded `wLength` (index 36: `wLength 32`, payload 20 bytes). `harness.send()`
+hands the payload bytes to `ctrl_transfer`, so pyusb sends `wLength = len(payload)` while `wIndex`
+keeps the recorded value. The arm works anyway, but our wide transfers are **not** byte-identical to
+the vendor's. `[VERIFIED]` about our own harness; the consequence is unquantified and is the first
+thing to re-examine if a wide-register experiment ever looks inconsistent.

@@ -1675,3 +1675,17 @@ written/read by Royale by number and already appear in the host arm transcript. 
 Still not claimed: that the fixed 2.4876 m shell is the 60 MHz ambiguity ceiling. The 0.43 % match
 is now between a measured radius and a frequency the SDK really knows about, which is a better
 coincidence than before and still not evidence. `[INFERRED]`
+
+## 35. Our arm already contains the vendor's modpll register sequence, including a read of 0x9802 (2026-10-25)
+
+Arm index 141 is `3d 21 9802 ffff`, paired with an IN. Index 126/183 write `0xc401` to 1 then 2,
+132/315 write `0xc400=1`, 189 writes `0xc40d=0x8012`, 36 is a `0x20` burst write to `0xb062`. These
+match `ImagerM2450::initialize` and `FUN_1800f2590` register for register. `[VERIFIED]`
+
+This narrows the search. The hypothesis that a *command* is missing from our arm is now much weaker
+for the PLL path specifically: the writes are there and the status read is armed. What has never
+existed is the captured response. `[VERIFIED]` about what we have; the interpretation of the values
+awaits IR-76 rev 2 running on the device.
+
+Also recorded, because it is a latent trap: 32 of 138 OUT entries have payload shorter than recorded
+`wLength`, and our harness sends `wLength = len(payload)`. `[VERIFIED]`
