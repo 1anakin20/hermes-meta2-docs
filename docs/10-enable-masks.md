@@ -157,3 +157,49 @@ Setting the multiplexor mask to `0x1f` (adding bit 2 = Mics) produced **no** `0x
 Buttons (`153`) are absent too, even though bit 3 was already set in the old `0x1b` mask.
 `[VERIFIED]` negative result. `[UNKNOWN]` whether mics need an additional command, only
 stream when the vendor app requests audio, or are not routed through EP 0x81 at all.
+
+## 10.8 The health gate works, and re-arming recovers a healthy session in 1-3 attempts (2026-10-25)
+
+`meta2lib` `src/health.c` + `include/meta2/health.h` classify a session as `OK`, `STARVED`, `FROZEN`
+or `NO_DATA` from the EP `0x81` record clock, and `meta2_capture_live gate tries=N probe=S` re-arms
+from a port reset until a session is fit. `docs/13` §13.11 is what the gate is built on.
+
+Gate decisions on the device, all four endpoints, mask `0x7e`, mux `0x1b`, warm `0x7e`, fast sustain,
+queue 8, 12 s windows, probe 4 s:
+
+| session | attempt | gate decision | window coverage | clock | records | counter span | mono fps/cam | EP `0x83` |
+|---|---|---|---|---|---|---|---|---|
+| 2 | 1 | rejected | 0.077 | 14.0 MHz | 383 | 380 | – | – |
+| 2 | 2 | **accepted** | **0.9989** | **182.80 MHz** | 3772 | 3335 | 48.6 | 58.76 MB/s |
+| 3 | 1 | rejected | 0.026 | 4.73 MHz | 377 | 375 | – | – |
+| 3 | 2 | rejected | 0.075 | 13.76 MHz | 379 | 377 | – | – |
+| 3 | 3 | **accepted** | **0.9944** | **181.98 MHz** | 3754 | 3382 | 47.0 | 59.34 MB/s |
+
+`[VERIFIED]`
+
+The two signatures are unambiguous. A starved run frames 377–383 records with the counter advancing
+one per record and a clock of 4.7–14 MHz. A healthy run frames 3754–3772 records with counter span
+3335–3382 and a clock of 182.0–182.8 MHz. Mono completeness alone does **not** separate them: a
+starved attempt reported 74.1% complete frames while delivering 12.7 fps.
+
+**The probe must be anchored at the first multiplexor record, not at the window opening.** Before
+that fix, twenty attempts across four sessions produced zero accepts, because EP `0x81` delivered 0
+bytes for the first ~3 s of the window while EP `0x82` was already delivering 100–400 MB. A probe
+anchored to the window start reported `NO_DATA` for a session whose mux stream was about to start and
+re-armed forever. `[VERIFIED]`
+
+Two things the gate does not do yet:
+
+1. **The probe is looser than the window verdict.** Accepted probes reported coverage 2.10 while the
+   same session's full-window coverage was 0.9989 — the probe window is measured from when the first
+   bytes were drained into the ring, not from the first record's own timestamp, so it credits the
+   probe with data that arrived before it. The full-window verdict is the authoritative one. `[OPEN]`
+2. **Nothing prevents the bad state, it only detects it.** Re-arming works, but the cost is 1–3
+   discarded attempts of ~25 s each. `[OPEN]` what actually selects the mode.
+
+**Measurement bug found while building this:** `mux.h` records that the `0xAA` record always carries
+header timestamp 0. A `max - min` span over a window containing one of them equals the entire
+magnitude of the clock. A starved 10 s run of 374 records measured 88 GHz at 48,300% coverage that
+way, and the first version of the gate accepted it as the healthiest run ever recorded. The gate now
+excludes timestamp-less records and decides on the median consecutive delta times the record rate.
+`[VERIFIED]`
