@@ -1230,3 +1230,72 @@ its ambiguity ceiling.
 truncated — valid `PK\003\004` local headers, no end-of-central-directory record. The three 72,624,650 B
 uploads are byte-identical and complete. Analysis used the complete archive.
 
+
+### 12.32 Static analysis: the modulation PLL is computed, and its lock bit is a register read
+
+The RTTI/vtable scanner (`re/vtable_scan.py`) now works. The blocker was the MSVC x64
+`CompleteObjectLocator` layout: its fields are **32-bit RVAs**, not 64-bit pointers, so a
+name→COL chase can never find anything. Scanning forward from method arrays works:
+
+```
+vtable+0x00 : VA of CompleteObjectLocator
+vtable+0x08 : first virtual method (VA into .text)
+COL+0  u32 signature (=1)   +4 u32 offset   +8 u32 cdOffset
+COL+12 u32 TypeDescriptor RVA   +16 u32 ClassHierarchyDescriptor RVA   +20 u32 ClassDescriptor RVA
+TypeDescriptor+16 : ".?AVClass@ns@ns@@"
+```
+
+`royale.2.3.1.dll` resolves to 327 named vtables (`artifacts/vtables_royale.txt`), including
+`BridgeSAQ` (16 virtual methods), `BridgeImagerSAQ` (6), `BusEnumeratorSAQ` (4), `I2cAccessSAQ` (3),
+`ImagerM2450` (14), `ImagerM2452` (14). `BridgeSAQ` slot[3] is `executeUseCase` at RVA `0x126de`,
+which matches §12.26 independently. `[VERIFIED]`
+
+**`pllSettings` is virtual and takes a target frequency.** The mangled symbols present in the DLL:
+
+```
+?pllSettings@ModPllStrategyM2450_A12@imager@royale@@UEAA_NN_NAEAV?$vector@GV?$allocator@G@std@@@std@@@Z
+?pllSettings@ModPllStrategyM2452_A11@imager@royale@@UEAA_NN_NAEAV...
+?pllSettings@DphyPllStrategyM2450_A12@imager@royale@@UEAA_NN_NAEAV...
+?pllSettings@DphyPllStrategyM2452_A11@imager@royale@@UEAA_NN_NAEAV...
+```
+
+Demangled: `virtual protected bool pllSettings(double, bool, std::vector<unsigned long long>&) const`,
+constructed from `shared_ptr<const royale::config::VICoreConfig>`. Four strategies: modulation PLL and
+DPHY PLL, for the M2450_A12 and M2452_A11 imagers. `[VERIFIED]` from the symbol strings.
+
+This closes §12.26's negative result. There is no modulation-frequency table in `.rdata` because the
+PLL divider words are **computed** from a requested frequency and returned as a `vector<uint64>` of
+register writes. `[INFERRED]`, strong — it explains the missing table rather than contradicting any
+measurement.
+
+**The function that logs `error modpll lock` is a register-write sequence.** String VA `0x1802d1d08`,
+referenced at `0x1800f27bd` and `0x1800f2806`. In order, that function does:
+
+| step | instruction evidence | meaning |
+|---|---|---|
+| 1 | `mov $0xc035,%edx; mov $0x1,%r8d; call 0x18000cf81` | write register `0xc035 = 0x0001` |
+| 2 | `mov $0xc036,%edx; mov $0x8000,%r8d; call 0x18000cf81` | write register `0xc036 = 0x8000` |
+| 3 | `mov $0xc400,%edx; mov $0x1,%r8d; call 0x18000cf81` | write register `0xc400 = 0x0001` |
+| 4 | `imul $0x64` then `add $0x2710`, `movabs $0x112e0be826d694b3` + `sar $0x1a`, `imul $0x3b9aca00` | compute `v*100 + 10000`, split into whole and remainder of `1e9` (`0x3b9aca00`) — a Hz/GHz frequency conversion |
+| 5 | `mov $0xc40f,%edx; call 0x180009f39` then `mov $0x4000,%eax; test %ax,[buf]` | read register `0xc40f`, test bit `0x4000` |
+| 6 | `mov 0x48(%rbx),%rcx; mov (%rcx),%rax; call *0x58(%rax)` then `mov 0x10(%rax),%edx; sub $0x1,%edx` | virtual call on the config object, branch on `cfg->field_0x10 - 1` being 0 or 1 |
+| 7 | `movzwl 0x1fa(%rbx),%r8d; movzwl 0x1f8(%rbx),%edx; call 0x18000cf81` | write register `[this+0x1f8] = [this+0x1fa]` |
+| 8 | `movq $0xc8,0x38(%rsp); ... call 0x180007d8d` | wait 200 (ms) |
+| 9 | `mov $0x9802,%edx; call 0x180009f39` then `testb $0x4,[buf]` | read register `0x9802`, test bit `0x04`; if clear → `error modpll lock` |
+
+The write helper thunk `0x18000cf81` resolves to `0x1800e0020`, whose body is
+`(rcx=this, dx=address16, r8w=value16)`, sets `edx=3`, calls `0x1800141e6`, then tail-jumps virtual
+slot 3 of the object at `[this+8]`. The read helper thunk `0x180009f39` resolves to `0x1800dcea0`.
+`[VERIFIED]` from disassembly.
+
+**Why this matters.** Registers `0x9802`, `0xc035`, `0xc036`, `0xc400`, `0xc40f` are 16-bit addresses in
+the same numeric space our host-side `bRequest 0xC0` primitive already reads and writes (`0xa882`,
+`0xb00e`, `0xc2bc`). `[INFERRED]`, untested. If that identity holds, then the modpll lock bit is
+directly readable from Linux with the tooling we already have, and it is the first **state** metric
+rather than a throughput metric for the missing measuring state.
+
+**IR-76 (next host-side experiment, no physical scene needed).** Under the standard host-only arm,
+read `0x9802`, `0xc035`, `0xc036`, `0xc400`, `0xc40f`. Predictions: if `0x9802` bit `0x04` is clear
+under host arm while EP `0x84` still streams, the modpll is unlocked and EP `0x84` is the unlocked
+fallback pattern — which would be the cleanest explanation yet for IR-61b's device-fixed pattern.
+If it is already set, this hypothesis dies and the search moves to the use-case packet itself.

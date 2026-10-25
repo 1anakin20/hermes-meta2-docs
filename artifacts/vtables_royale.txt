@@ -1,0 +1,397 @@
+royale.2.3.1.dll: 414 method-array runs found
+resolved vtables with RTTI names: 327
+
+=== .?AV?$_Ref_count@VBridgeSAQ@bridge@usb@royale@@@std@@
+    VTABLE 0x1802db518 [.rdata]  rva=0x2db518   4 virtual methods
+    COL 0x180312998 (sig=1 offset=0 cdOffset=0)  TD rva=0x3a9c10  CD rva=0x312998
+      slot[ 0]  rva=0x2702  va=0x180002702
+      slot[ 1]  rva=0x902a  va=0x18000902a
+      slot[ 2]  rva=0xe714  va=0x18000e714
+      slot[ 3]  rva=0x11dab  va=0x180011dab
+
+=== .?AV?$_Ref_count@VImagerM2450_A11@imager@royale@@@std@@
+    VTABLE 0x1802cd0f0 [.rdata]  rva=0x2cd0f0   4 virtual methods
+    COL 0x18030c710 (sig=1 offset=0 cdOffset=0)  TD rva=0x3a6a20  CD rva=0x30c710
+      slot[ 0]  rva=0x2dce  va=0x180002dce
+      slot[ 1]  rva=0xfdc1  va=0x18000fdc1
+      slot[ 2]  rva=0x1749  va=0x180001749
+      slot[ 3]  rva=0x11dab  va=0x180011dab
+
+=== .?AV?$_Ref_count@VImagerM2450_A12_SR@imager@royale@@@std@@
+    VTABLE 0x1802cd120 [.rdata]  rva=0x2cd120   4 virtual methods
+    COL 0x18030c7a0 (sig=1 offset=0 cdOffset=0)  TD rva=0x3a6a80  CD rva=0x30c7a0
+      slot[ 0]  rva=0x53df  va=0x1800053df
+      slot[ 1]  rva=0x129e  va=0x18000129e
+      slot[ 2]  rva=0x8a6c  va=0x180008a6c
+      slot[ 3]  rva=0x11dab  va=0x180011dab
+
+=== .?AV?$_Ref_count@VImagerM2450_A12_SSC@imager@royale@@@std@@
+    VTABLE 0x1802cd150 [.rdata]  rva=0x2cd150   4 virtual methods
+    COL 0x18030c830 (sig=1 offset=0 cdOffset=0)  TD rva=0x3a6ae0  CD rva=0x30c830
+      slot[ 0]  rva=0x7716  va=0x180007716
+      slot[ 1]  rva=0xa777  va=0x18000a777
+      slot[ 2]  rva=0x254a  va=0x18000254a
+      slot[ 3]  rva=0x11dab  va=0x180011dab
+
+=== .?AV?$_Ref_count_obj@VBridgeImagerArctic@bridge@usb@royale@@@std@@
+    VTABLE 0x1802dbf48 [.rdata]  rva=0x2dbf48   4 virtual methods
+    COL 0x1803135c8 (sig=1 offset=0 cdOffset=0)  TD rva=0x3aa050  CD rva=0x3135c8
+      slot[ 0]  rva=0x9570  va=0x180009570
+      slot[ 1]  rva=0xfefc  va=0x18000fefc
+      slot[ 2]  rva=0xf10a  va=0x18000f10a
+      slot[ 3]  rva=0x11dab  va=0x180011dab
+
+=== .?AVBridgeImagerArctic@bridge@usb@royale@@
+    VTABLE 0x1802dc158 [.rdata]  rva=0x2dc158   6 virtual methods
+    COL 0x180313898 (sig=1 offset=0 cdOffset=0)  TD rva=0x3aa278  CD rva=0x313898
+      slot[ 0]  rva=0x6da2  va=0x180006da2
+      slot[ 1]  rva=0x12a5d  va=0x180012a5d
+      slot[ 2]  rva=0xe912  va=0x18000e912
+      slot[ 3]  rva=0x101f4  va=0x1800101f4
+      slot[ 4]  rva=0x72cf  va=0x1800072cf
+      slot[ 5]  rva=0x290f  va=0x18000290f
+
+=== .?AVBridgeImagerSAQ@bridge@usb@royale@@
+    VTABLE 0x1802db610 [.rdata]  rva=0x2db610   6 virtual methods
+    COL 0x180312a28 (sig=1 offset=0 cdOffset=0)  TD rva=0x3a9c68  CD rva=0x312a28
+      slot[ 0]  rva=0xb898  va=0x18000b898
+      slot[ 1]  rva=0x12a08  va=0x180012a08
+      slot[ 2]  rva=0xdad5  va=0x18000dad5
+      slot[ 3]  rva=0x4e62  va=0x180004e62
+      slot[ 4]  rva=0x2923  va=0x180002923
+      slot[ 5]  rva=0x909d  va=0x18000909d
+
+=== .?AVBridgeSAQ@bridge@usb@royale@@
+    VTABLE 0x1802da860 [.rdata]  rva=0x2da860   16 virtual methods
+    COL 0x180312218 (sig=1 offset=0 cdOffset=0)  TD rva=0x3a9880  CD rva=0x312218
+      slot[ 0]  rva=0xab82  va=0x18000ab82
+      slot[ 1]  rva=0x1924  va=0x180001924
+      slot[ 2]  rva=0xdc9c  va=0x18000dc9c
+      slot[ 3]  rva=0x126de  va=0x1800126de
+      slot[ 4]  rva=0x11757  va=0x180011757
+      slot[ 5]  rva=0x7748  va=0x180007748
+      slot[ 6]  rva=0x380a  va=0x18000380a
+      slot[ 7]  rva=0xef0c  va=0x18000ef0c
+      slot[ 8]  rva=0x79c8  va=0x1800079c8
+      slot[ 9]  rva=0x11f2c  va=0x180011f2c
+      slot[10]  rva=0xac2c  va=0x18000ac2c
+      slot[11]  rva=0xee44  va=0x18000ee44
+      slot[12]  rva=0x131b0  va=0x1800131b0
+      slot[13]  rva=0x641f  va=0x18000641f
+      slot[14]  rva=0xc865  va=0x18000c865
+      slot[15]  rva=0x12d37  va=0x180012d37
+
+=== .?AVBridgeSAQ@bridge@usb@royale@@
+    VTABLE 0x1802da908 [.rdata]  rva=0x2da908   5 virtual methods
+    COL 0x180312378 (sig=1 offset=304 cdOffset=0)  TD rva=0x3a9880  CD rva=0x312378
+      slot[ 0]  rva=0x10cb2  va=0x180010cb2
+      slot[ 1]  rva=0x129fe  va=0x1800129fe
+      slot[ 2]  rva=0x75f4  va=0x1800075f4
+      slot[ 3]  rva=0x1e9c  va=0x180001e9c
+      slot[ 4]  rva=0x13ef8  va=0x180013ef8
+
+=== .?AVBridgeSAQ@bridge@usb@royale@@
+    VTABLE 0x1802da948 [.rdata]  rva=0x2da948   6 virtual methods
+    COL 0x1803123a8 (sig=1 offset=312 cdOffset=0)  TD rva=0x3a9880  CD rva=0x3123a8
+      slot[ 0]  rva=0x47fa  va=0x1800047fa
+      slot[ 1]  rva=0xcb0d  va=0x18000cb0d
+      slot[ 2]  rva=0xf704  va=0x18000f704
+      slot[ 3]  rva=0xf7f4  va=0x18000f7f4
+      slot[ 4]  rva=0x108e8  va=0x1800108e8
+      slot[ 5]  rva=0xd9db  va=0x18000d9db
+
+=== .?AVBridgeSAQ@bridge@usb@royale@@
+    VTABLE 0x1802da990 [.rdata]  rva=0x2da990   4 virtual methods
+    COL 0x1803123d8 (sig=1 offset=320 cdOffset=0)  TD rva=0x3a9880  CD rva=0x3123d8
+      slot[ 0]  rva=0x7216  va=0x180007216
+      slot[ 1]  rva=0xcf40  va=0x18000cf40
+      slot[ 2]  rva=0x11fae  va=0x180011fae
+      slot[ 3]  rva=0x101e  va=0x18000101e
+
+=== .?AVBridgeSAQBase@bridge@usb@royale@@
+    VTABLE 0x1802dafa0 [.rdata]  rva=0x2dafa0   16 virtual methods
+    COL 0x180312490 (sig=1 offset=0 cdOffset=0)  TD rva=0x3a98c0  CD rva=0x312490
+      slot[ 0]  rva=0x13e44  va=0x180013e44
+      slot[ 1]  rva=0x1924  va=0x180001924
+      slot[ 2]  rva=0xdc9c  va=0x18000dc9c
+      slot[ 3]  rva=0x126de  va=0x1800126de
+      slot[ 4]  rva=0x73e7  va=0x1800073e7
+      slot[ 5]  rva=0x7748  va=0x180007748
+      slot[ 6]  rva=0x380a  va=0x18000380a
+      slot[ 7]  rva=0x73e7  va=0x1800073e7
+      slot[ 8]  rva=0x79c8  va=0x1800079c8
+      slot[ 9]  rva=0x11f2c  va=0x180011f2c
+      slot[10]  rva=0xac2c  va=0x18000ac2c
+      slot[11]  rva=0xee44  va=0x18000ee44
+      slot[12]  rva=0x131b0  va=0x1800131b0
+      slot[13]  rva=0x73e7  va=0x1800073e7
+      slot[14]  rva=0x73e7  va=0x1800073e7
+      slot[15]  rva=0x73e7  va=0x1800073e7
+
+=== .?AVBridgeSAQBase@bridge@usb@royale@@
+    VTABLE 0x1802db048 [.rdata]  rva=0x2db048   5 virtual methods
+    COL 0x1803124c0 (sig=1 offset=304 cdOffset=0)  TD rva=0x3a98c0  CD rva=0x3124c0
+      slot[ 0]  rva=0x13ff7  va=0x180013ff7
+      slot[ 1]  rva=0x129fe  va=0x1800129fe
+      slot[ 2]  rva=0x75f4  va=0x1800075f4
+      slot[ 3]  rva=0x1e9c  va=0x180001e9c
+      slot[ 4]  rva=0x13ef8  va=0x180013ef8
+
+=== .?AVBridgeSAQBase@bridge@usb@royale@@
+    VTABLE 0x1802db088 [.rdata]  rva=0x2db088   6 virtual methods
+    COL 0x1803124f0 (sig=1 offset=312 cdOffset=0)  TD rva=0x3a98c0  CD rva=0x3124f0
+      slot[ 0]  rva=0x18fc  va=0x1800018fc
+      slot[ 1]  rva=0xcb0d  va=0x18000cb0d
+      slot[ 2]  rva=0xf704  va=0x18000f704
+      slot[ 3]  rva=0xf7f4  va=0x18000f7f4
+      slot[ 4]  rva=0x108e8  va=0x1800108e8
+      slot[ 5]  rva=0xd9db  va=0x18000d9db
+
+=== .?AVBridgeSAQBase@bridge@usb@royale@@
+    VTABLE 0x1802db0d0 [.rdata]  rva=0x2db0d0   4 virtual methods
+    COL 0x180312520 (sig=1 offset=320 cdOffset=0)  TD rva=0x3a98c0  CD rva=0x312520
+      slot[ 0]  rva=0xed4f  va=0x18000ed4f
+      slot[ 1]  rva=0xcf40  va=0x18000cf40
+      slot[ 2]  rva=0x11fae  va=0x180011fae
+      slot[ 3]  rva=0x101e  va=0x18000101e
+
+=== .?AVIBridgeImager@hal@royale@@
+    VTABLE 0x1802d9600 [.rdata]  rva=0x2d9600   6 virtual methods
+    COL 0x180311058 (sig=1 offset=0 cdOffset=0)  TD rva=0x3a9258  CD rva=0x311058
+      slot[ 0]  rva=0x910b  va=0x18000910b
+      slot[ 1]  rva=0x73e7  va=0x1800073e7
+      slot[ 2]  rva=0x73e7  va=0x1800073e7
+      slot[ 3]  rva=0x73e7  va=0x1800073e7
+      slot[ 4]  rva=0x73e7  va=0x1800073e7
+      slot[ 5]  rva=0x73e7  va=0x1800073e7
+
+=== .?AVImagerM2450@imager@royale@@
+    VTABLE 0x1802d0dc8 [.rdata]  rva=0x2d0dc8   29 virtual methods
+    COL 0x18030ea48 (sig=1 offset=0 cdOffset=0)  TD rva=0x3a6100  CD rva=0x30ea48
+      slot[ 0]  rva=0x31a7  va=0x1800031a7
+      slot[ 1]  rva=0xfffb  va=0x18000fffb
+      slot[ 2]  rva=0xaeb1  va=0x18000aeb1
+      slot[ 3]  rva=0xfc86  va=0x18000fc86
+      slot[ 4]  rva=0x112b1  va=0x1800112b1
+      slot[ 5]  rva=0x1c30  va=0x180001c30
+      slot[ 6]  rva=0x6163  va=0x180006163
+      slot[ 7]  rva=0x754f  va=0x18000754f
+      slot[ 8]  rva=0x3846  va=0x180003846
+      slot[ 9]  rva=0x11da1  va=0x180011da1
+      slot[10]  rva=0x127b5  va=0x1800127b5
+      slot[11]  rva=0x73e7  va=0x1800073e7
+      slot[12]  rva=0xec5a  va=0x18000ec5a
+      slot[13]  rva=0x30e9  va=0x1800030e9
+      slot[14]  rva=0x73e7  va=0x1800073e7
+      slot[15]  rva=0x82bf  va=0x1800082bf
+      slot[16]  rva=0x8d37  va=0x180008d37
+      slot[17]  rva=0xf73b  va=0x18000f73b
+      slot[18]  rva=0x13db8  va=0x180013db8
+      slot[19]  rva=0xc310  va=0x18000c310
+      slot[20]  rva=0x3a71  va=0x180003a71
+      slot[21]  rva=0x73e7  va=0x1800073e7
+      slot[22]  rva=0x2e3c  va=0x180002e3c
+      slot[23]  rva=0xf8d0  va=0x18000f8d0
+      slot[24]  rva=0x957f  va=0x18000957f
+      slot[25]  rva=0xb44c  va=0x18000b44c
+      slot[26]  rva=0xbea6  va=0x18000bea6
+      slot[27]  rva=0x3323  va=0x180003323
+      slot[28]  rva=0xa0ba  va=0x18000a0ba
+
+=== .?AVImagerM2450_A11@imager@royale@@
+    VTABLE 0x1802d1540 [.rdata]  rva=0x2d1540   29 virtual methods
+    COL 0x18030ea78 (sig=1 offset=0 cdOffset=0)  TD rva=0x3a60c0  CD rva=0x30ea78
+      slot[ 0]  rva=0x1377d  va=0x18001377d
+      slot[ 1]  rva=0x4ab6  va=0x180004ab6
+      slot[ 2]  rva=0x140c4  va=0x1800140c4
+      slot[ 3]  rva=0xc194  va=0x18000c194
+      slot[ 4]  rva=0x9f1b  va=0x180009f1b
+      slot[ 5]  rva=0x1c30  va=0x180001c30
+      slot[ 6]  rva=0x6163  va=0x180006163
+      slot[ 7]  rva=0x754f  va=0x18000754f
+      slot[ 8]  rva=0x3846  va=0x180003846
+      slot[ 9]  rva=0x11da1  va=0x180011da1
+      slot[10]  rva=0x127b5  va=0x1800127b5
+      slot[11]  rva=0xc207  va=0x18000c207
+      slot[12]  rva=0xec5a  va=0x18000ec5a
+      slot[13]  rva=0x30e9  va=0x1800030e9
+      slot[14]  rva=0xc608  va=0x18000c608
+      slot[15]  rva=0x82bf  va=0x1800082bf
+      slot[16]  rva=0x8d37  va=0x180008d37
+      slot[17]  rva=0xf73b  va=0x18000f73b
+      slot[18]  rva=0x7045  va=0x180007045
+      slot[19]  rva=0xc310  va=0x18000c310
+      slot[20]  rva=0x3a71  va=0x180003a71
+      slot[21]  rva=0x2e14  va=0x180002e14
+      slot[22]  rva=0x2e3c  va=0x180002e3c
+      slot[23]  rva=0xf8d0  va=0x18000f8d0
+      slot[24]  rva=0x957f  va=0x18000957f
+      slot[25]  rva=0xb44c  va=0x18000b44c
+      slot[26]  rva=0xbea6  va=0x18000bea6
+      slot[27]  rva=0x3323  va=0x180003323
+      slot[28]  rva=0xcb08  va=0x18000cb08
+
+=== .?AVImagerM2450_A11_DirectAccess@imager@royale@@
+    VTABLE 0x1802cc3d8 [.rdata]  rva=0x2cc3d8   29 virtual methods
+    COL 0x18030b530 (sig=1 offset=0 cdOffset=0)  TD rva=0x3a6070  CD rva=0x30b530
+      slot[ 0]  rva=0x6019  va=0x180006019
+      slot[ 1]  rva=0x4ab6  va=0x180004ab6
+      slot[ 2]  rva=0x140c4  va=0x1800140c4
+      slot[ 3]  rva=0xc194  va=0x18000c194
+      slot[ 4]  rva=0x9f1b  va=0x180009f1b
+      slot[ 5]  rva=0x1c30  va=0x180001c30
+      slot[ 6]  rva=0x6163  va=0x180006163
+      slot[ 7]  rva=0x754f  va=0x18000754f
+      slot[ 8]  rva=0x3846  va=0x180003846
+      slot[ 9]  rva=0x11da1  va=0x180011da1
+      slot[10]  rva=0x127b5  va=0x1800127b5
+      slot[11]  rva=0xc207  va=0x18000c207
+      slot[12]  rva=0x2018  va=0x180002018
+      slot[13]  rva=0x9c05  va=0x180009c05
+      slot[14]  rva=0xc608  va=0x18000c608
+      slot[15]  rva=0x82bf  va=0x1800082bf
+      slot[16]  rva=0x8d37  va=0x180008d37
+      slot[17]  rva=0xf73b  va=0x18000f73b
+      slot[18]  rva=0x7045  va=0x180007045
+      slot[19]  rva=0xc310  va=0x18000c310
+      slot[20]  rva=0x3a71  va=0x180003a71
+      slot[21]  rva=0x2e14  va=0x180002e14
+      slot[22]  rva=0x2e3c  va=0x180002e3c
+      slot[23]  rva=0xf8d0  va=0x18000f8d0
+      slot[24]  rva=0x957f  va=0x18000957f
+      slot[25]  rva=0xb44c  va=0x18000b44c
+      slot[26]  rva=0xbea6  va=0x18000bea6
+      slot[27]  rva=0x3323  va=0x180003323
+      slot[28]  rva=0xcb08  va=0x18000cb08
+
+=== .?AVImagerM2450_A12_SR@imager@royale@@
+    VTABLE 0x1802d1ab0 [.rdata]  rva=0x2d1ab0   29 virtual methods
+    COL 0x18030eaa8 (sig=1 offset=0 cdOffset=0)  TD rva=0x3a6248  CD rva=0x30eaa8
+      slot[ 0]  rva=0xea11  va=0x18000ea11
+      slot[ 1]  rva=0x2b94  va=0x180002b94
+      slot[ 2]  rva=0x14470  va=0x180014470
+      slot[ 3]  rva=0x11ae0  va=0x180011ae0
+      slot[ 4]  rva=0x14272  va=0x180014272
+      slot[ 5]  rva=0x1c30  va=0x180001c30
+      slot[ 6]  rva=0x6163  va=0x180006163
+      slot[ 7]  rva=0x754f  va=0x18000754f
+      slot[ 8]  rva=0x3846  va=0x180003846
+      slot[ 9]  rva=0x11da1  va=0x180011da1
+      slot[10]  rva=0x127b5  va=0x1800127b5
+      slot[11]  rva=0xcae0  va=0x18000cae0
+      slot[12]  rva=0xec5a  va=0x18000ec5a
+      slot[13]  rva=0x30e9  va=0x1800030e9
+      slot[14]  rva=0x4df9  va=0x180004df9
+      slot[15]  rva=0x82bf  va=0x1800082bf
+      slot[16]  rva=0x8d37  va=0x180008d37
+      slot[17]  rva=0xf73b  va=0x18000f73b
+      slot[18]  rva=0xade4  va=0x18000ade4
+      slot[19]  rva=0xc310  va=0x18000c310
+      slot[20]  rva=0x3a71  va=0x180003a71
+      slot[21]  rva=0x4c3c  va=0x180004c3c
+      slot[22]  rva=0x2e3c  va=0x180002e3c
+      slot[23]  rva=0xf8d0  va=0x18000f8d0
+      slot[24]  rva=0x957f  va=0x18000957f
+      slot[25]  rva=0xb44c  va=0x18000b44c
+      slot[26]  rva=0xbea6  va=0x18000bea6
+      slot[27]  rva=0x7220  va=0x180007220
+      slot[28]  rva=0x13af2  va=0x180013af2
+
+=== .?AVImagerM2450_A12_SR_DirectAccess@imager@royale@@
+    VTABLE 0x1802cc4f8 [.rdata]  rva=0x2cc4f8   29 virtual methods
+    COL 0x18030b808 (sig=1 offset=0 cdOffset=0)  TD rva=0x3a61f0  CD rva=0x30b808
+      slot[ 0]  rva=0xb4c9  va=0x18000b4c9
+      slot[ 1]  rva=0x2b94  va=0x180002b94
+      slot[ 2]  rva=0x14470  va=0x180014470
+      slot[ 3]  rva=0x11ae0  va=0x180011ae0
+      slot[ 4]  rva=0x14272  va=0x180014272
+      slot[ 5]  rva=0x1c30  va=0x180001c30
+      slot[ 6]  rva=0x6163  va=0x180006163
+      slot[ 7]  rva=0x754f  va=0x18000754f
+      slot[ 8]  rva=0x3846  va=0x180003846
+      slot[ 9]  rva=0x11da1  va=0x180011da1
+      slot[10]  rva=0x127b5  va=0x1800127b5
+      slot[11]  rva=0xcae0  va=0x18000cae0
+      slot[12]  rva=0x11559  va=0x180011559
+      slot[13]  rva=0xb63b  va=0x18000b63b
+      slot[14]  rva=0x4df9  va=0x180004df9
+      slot[15]  rva=0x82bf  va=0x1800082bf
+      slot[16]  rva=0x8d37  va=0x180008d37
+      slot[17]  rva=0xf73b  va=0x18000f73b
+      slot[18]  rva=0xade4  va=0x18000ade4
+      slot[19]  rva=0xc310  va=0x18000c310
+      slot[20]  rva=0x3a71  va=0x180003a71
+      slot[21]  rva=0x4c3c  va=0x180004c3c
+      slot[22]  rva=0x2e3c  va=0x180002e3c
+      slot[23]  rva=0xf8d0  va=0x18000f8d0
+      slot[24]  rva=0x957f  va=0x18000957f
+      slot[25]  rva=0xb44c  va=0x18000b44c
+      slot[26]  rva=0xbea6  va=0x18000bea6
+      slot[27]  rva=0x7220  va=0x180007220
+      slot[28]  rva=0x13af2  va=0x180013af2
+
+=== .?AVImagerM2450_A12_SSC@imager@royale@@
+    VTABLE 0x1802d1e30 [.rdata]  rva=0x2d1e30   29 virtual methods
+    COL 0x18030ead8 (sig=1 offset=0 cdOffset=0)  TD rva=0x3a62e8  CD rva=0x30ead8
+      slot[ 0]  rva=0x428c  va=0x18000428c
+      slot[ 1]  rva=0x41ce  va=0x1800041ce
+      slot[ 2]  rva=0x14470  va=0x180014470
+      slot[ 3]  rva=0x54f7  va=0x1800054f7
+      slot[ 4]  rva=0x14272  va=0x180014272
+      slot[ 5]  rva=0x1c30  va=0x180001c30
+      slot[ 6]  rva=0x6163  va=0x180006163
+      slot[ 7]  rva=0x754f  va=0x18000754f
+      slot[ 8]  rva=0x3846  va=0x180003846
+      slot[ 9]  rva=0x11da1  va=0x180011da1
+      slot[10]  rva=0x127b5  va=0x1800127b5
+      slot[11]  rva=0xcae0  va=0x18000cae0
+      slot[12]  rva=0xec5a  va=0x18000ec5a
+      slot[13]  rva=0x30e9  va=0x1800030e9
+      slot[14]  rva=0x4df9  va=0x180004df9
+      slot[15]  rva=0x82bf  va=0x1800082bf
+      slot[16]  rva=0x8d37  va=0x180008d37
+      slot[17]  rva=0xf73b  va=0x18000f73b
+      slot[18]  rva=0xade4  va=0x18000ade4
+      slot[19]  rva=0xc310  va=0x18000c310
+      slot[20]  rva=0x3a71  va=0x180003a71
+      slot[21]  rva=0x4c3c  va=0x180004c3c
+      slot[22]  rva=0x1cb7  va=0x180001cb7
+      slot[23]  rva=0xf8d0  va=0x18000f8d0
+      slot[24]  rva=0x957f  va=0x18000957f
+      slot[25]  rva=0x8a44  va=0x180008a44
+      slot[26]  rva=0xbea6  va=0x18000bea6
+      slot[27]  rva=0x7220  va=0x180007220
+      slot[28]  rva=0xd111  va=0x18000d111
+
+=== .?AVImagerM2450_A12_SSC_DirectAccess@imager@royale@@
+    VTABLE 0x1802cc618 [.rdata]  rva=0x2cc618   29 virtual methods
+    COL 0x18030b940 (sig=1 offset=0 cdOffset=0)  TD rva=0x3a6290  CD rva=0x30b940
+      slot[ 0]  rva=0x40e8  va=0x1800040e8
+      slot[ 1]  rva=0x41ce  va=0x1800041ce
+      slot[ 2]  rva=0x14470  va=0x180014470
+      slot[ 3]  rva=0x54f7  va=0x1800054f7
+      slot[ 4]  rva=0x14272  va=0x180014272
+      slot[ 5]  rva=0x1c30  va=0x180001c30
+      slot[ 6]  rva=0x6163  va=0x180006163
+      slot[ 7]  rva=0x754f  va=0x18000754f
+      slot[ 8]  rva=0x3846  va=0x180003846
+      slot[ 9]  rva=0x11da1  va=0x180011da1
+      slot[10]  rva=0x127b5  va=0x1800127b5
+      slot[11]  rva=0xcae0  va=0x18000cae0
+      slot[12]  rva=0x1127  va=0x180001127
+      slot[13]  rva=0x10aa0  va=0x180010aa0
+      slot[14]  rva=0x4df9  va=0x180004df9
+      slot[15]  rva=0x82bf  va=0x1800082bf
+      slot[16]  rva=0x8d37  va=0x180008d37
+      slot[17]  rva=0xf73b  va=0x18000f73b
+      slot[18]  rva=0xade4  va=0x18000ade4
+      slot[19]  rva=0xc310  va=0x18000c310
+      slot[20]  rva=0x3a71  va=0x180003a71
+      slot[21]  rva=0x4c3c  va=0x180004c3c
+      slot[22]  rva=0x1cb7  va=0x180001cb7
+      slot[23]  rva=0xf8d0  va=0x18000f8d0
+      slot[24]  rva=0x957f  va=0x18000957f
+      slot[25]  rva=0x8a44  va=0x180008a44
+      slot[26]  rva=0xbea6  va=0x18000bea6
+      slot[27]  rva=0x7220  va=0x180007220
+      slot[28]  rva=0xd111  va=0x18000d111

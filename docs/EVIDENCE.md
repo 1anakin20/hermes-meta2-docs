@@ -1619,3 +1619,26 @@ And the shell radius is quantitatively the ToF ambiguity ceiling: `c/(2 × 2.487
 against `c/(2 × 60 MHz) = 2.4983 m`. `[VERIFIED]` arithmetic; `[INFERRED]` that the imager modulates
 near 60 MHz and returns phase at the ceiling.
 Artifacts: `artifacts/ir74_win/`.
+
+## 32. Static analysis found the modulation PLL path and a lock-status register (2026-10-25)
+
+`re/vtable_scan.py` resolves MSVC x64 vtables once the COL layout is known: COL fields are 32-bit
+RVAs, not 64-bit pointers. `royale.2.3.1.dll` yields 327 named vtables; `BridgeSAQ` has 16 virtual
+methods and slot[3] is `executeUseCase` at RVA `0x126de`, independently matching §12.26. `[VERIFIED]`
+Artifacts: `artifacts/vtables_royale.txt`.
+
+`pllSettings` exists as a **virtual** method on four strategies — `ModPllStrategyM2450_A12`,
+`ModPllStrategyM2452_A11`, `DphyPllStrategyM2450_A12`, `DphyPllStrategyM2452_A11` — with signature
+`bool(double, bool, std::vector<unsigned long long>&) const`. `[VERIFIED]` from mangled symbols.
+
+This **withdraws the framing** of §12.26's "no modulation frequency table found" as a dead end: a
+computed PLL has no table to find. `[RULE]` The negative result stands; the interpretation that the
+frequencies must be somewhere static in `.rdata` does not.
+
+The function that logs `error modpll lock` writes `0xc035=1`, `0xc036=0x8000`, `0xc400=1`, performs a
+`1e9`-based frequency split, reads `0xc40f` and tests bit `0x4000`, waits 200 ms, then reads `0x9802`
+and tests bit `0x04`. `[VERIFIED]` from disassembly at `0x1800f2658`–`0x1800f283e`.
+
+Not claimed: that these addresses are the same address space our host `0xC0` register primitive
+addresses. That is `[INFERRED]` and is exactly what IR-76 must test before anything else is built on
+it.
