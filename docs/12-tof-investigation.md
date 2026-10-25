@@ -1751,3 +1751,65 @@ transfer — not a proxy fault. `[VERIFIED]`
 
 **Note on healthy-state variance.** IR-74 healthy was `streams=4080`, IR-80 `4080`, IR-81 `3983`.
 The stream mask is not a constant across runs; do not gate a run on an exact mask value.
+
+### 12.43 — IR-82: first complete healthy 7-minute SDK run, and the cyapi proxy is on the wrong layer
+
+Upload: `m2out3_LAPTOP-DC9899IK_20261025_125832.zip` (228,787,898 B compressed, 146 members,
+349,231,656 B uncompressed, `testzip` clean), sha256
+`b2ca211432c0777a84141530c172a348170407f546cac08b7ce40602d4942586`. Extracted to
+`re/ir82_win/run1/`. v8 package.
+
+**Measured — v8 fixed the crash and the run completed.** `manifest.txt`: `duration_s=424.6
+polls=2536 rgb_frames=126 buffer_dumps=344`. `stats.csv`: `dev=4 conn=1` for 2532/2536 polls,
+`track_state=1` for 2532, stream mask `4095` (`0xFFF`, all twelve streams) for 2434 polls. The
+proxy trailer `=== proxy unloading, 19 calls logged` is present, confirming a clean exit. Healthy at
+9.1 s. `[VERIFIED]`
+
+**Measured — the point cloud is entirely empty for the whole run.** Every healthy poll reports
+`pc_n = 101024` (the full 352×288 grid) and `pc_nz = 0`. Zero non-zero points across 2532 polls.
+`mesh_v = 0` and `mesh_t = 0` in every poll. No phase keys were pressed (`phases.csv` is header
+only), so this is a static-scene baseline. The four render buffers (`eye_depth_stencil`,
+`eye_depth_stencil_texture`, `eye_texture`, `eye_render_target_view`) are `ptr=NULL` in all 344
+dumps — in safe mode those getters are never called, so the NULLs are an artifact of safe mode,
+not a device answer. `[VERIFIED]` for the emptiness; the NULL buffers carry no information.
+
+**Measured — the cyapi transcript is enumeration only.** `cyapi_calls.log` has 19 calls, all inside
+the first 0.2 s, then 424 s of total silence while ~160 MB/s streamed:
+
+- `CCyUSBDevice` ctor with GUID bytes `92BBA85A A4309D44 B94E5B99 5E862939` → `DeviceCount` = 1 →
+  `Open` = 1 → destructor.
+- Then repeated ctor → `DeviceCount` = 0 → destructor cycles, and a second ctor with a different
+  GUID bytes `212A15F0 C9836D45 B3070C852C2D7199`.
+- No `XferData`, no `CCyControlEndPoint::Read/Write`, nothing after 12:50:47.614.
+
+**Measured — why.** Import graph of the SDK `bin`:
+
+| module | imports |
+|---|---|
+| `meta_block_device_stream.dll` | `meta2_host_impl.dll`, `meta2_host_itf.dll`, `royale.2.3.1.dll` |
+| `royale.2.3.1.dll` | `meta2_host_impl.dll`, `cyapi.dll` |
+| `royaleCAPI.2.3.1.dll` | `royale.2.3.1.dll` |
+| `meta2_host_impl.dll` | `meta2_host_itf.dll`, kernel32, SETUPAPI, … (no cyapi) |
+
+`meta2_host_impl.dll` reaches the device **directly**: `SetupDiGetClassDevsA` →
+`SetupDiEnumDeviceInterfaces` → `SetupDiGetDeviceInterfaceDetailA` → `CreateFileA` →
+`DeviceIoControl` + `GetOverlappedResult` + `CreateEventA/W`. It never calls `cyapi.dll`.
+
+**Conclusion (measured, not inferred).** The `cyapi.dll` proxy sits on the wrong edge. CyAPI is used
+only by Royale for its own device enumeration, and that enumeration opens and immediately closes the
+device. The vendor's streaming and register traffic goes through `meta2_host_impl.dll`'s own
+`DeviceIoControl` calls into `METAUSB3.sys`. The "what is on the wire" transcript has therefore
+**not** been captured yet, and the stop-ToF decision rule has not been evaluated.
+
+**Next interception target.** `meta2_host_impl.dll` exports the semantic device commands by name —
+`Connect`, `Disconnect`, `ReadI2C`, `WriteI2C`, `ReadFromSPIMemory`, `WriteToSPIMemory`, `SetGPIO`,
+`ConfigureLed`, `SetExposure`, `GetExposure`, `GetAnalogGain`, `SetAnalogGain` — so a proxy there
+logs device commands in semantic form rather than raw USB. Forwarding must be done with register-
+preserving assembly stubs (dump `rcx/rdx/r8/r9` + stack args, then tail `jmp` to the real export),
+because a C-level forwarder with a fixed argument list is what produced the garbage `BULK len=`
+values in this log.
+
+**Measured — the recording attribute is accepted but not honoured.** `enable_royale_recording=true`,
+`royale_recording_filename=ir75_tof.rrf`, `enable_depth=true` all returned `True` post-start, yet
+`recordings.txt` says `rrf_found=0` and the probe logged "no .rrf recording produced". Pre-start the
+same calls threw. `[VERIFIED]`
