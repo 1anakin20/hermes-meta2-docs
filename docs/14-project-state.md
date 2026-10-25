@@ -33,16 +33,30 @@ bulk device; the Windows VM path is `vm.sh` + QMP `id=meta2usb` (cold-attach at 
 
 | Endpoint | Content | Measured rate | State |
 |---|---|---|---|
-| `0x81` | Multiplexor, fixed 256-byte records: IMU0, IMU1, microphone audio, an undocumented `0xAA` record | ~57 records/s | decoded |
-| `0x82` | Two 752×480 10-bit mono cameras, interleaved as 4,096-byte fragments (`0x44` wearer's left, `0x55` wearer's right) | 36 fps each in the full-throughput run | exact-frame assembly implemented |
-| `0x83` | YUV422 1280×720 colour camera | 30 fps | decoded, record-delimited |
+| `0x81` | Multiplexor, fixed 256-byte records: IMU0, IMU1, microphone audio, an undocumented `0xAA` record | 80–448 records/s depending on configuration (not a fixed rate) | decoded; **clock not characterised** |
+| `0x82` | Two 752×480 10-bit mono cameras, interleaved as 4,096-byte fragments (`0x44` wearer's left, `0x55` wearer's right) | 36.5 frame **slots**/s each; **~27.0 complete frames/s each** (79–84% of volume) | exact-frame assembly implemented |
+| `0x83` | YUV422 1280×720 colour camera | 28.8 fps at 53 MB/s, **51.6 complete frames/s at 95.6 MB/s**, 99.7% framing | decoded, record-delimited |
 | `0x84` | 352×288 16-bit ToF (row 0 = 4095 sentinel row) | ~300 fps | framing solved, **no scene information** |
 
 Aggregate 163 MB/s across all four. `ctest` is 6/6 green. `meta2::frame` is pure parsing
 (testable with no headset attached); `meta2::transport` is the libusb side.
 
-**The active track from here is: ship this as the tracking front end.** Mono at 36 fps × 2 plus
-RGB at 30 fps plus dual IMU is a legitimate VIO input set.
+**Rates in that table were recomputed 2026-10-25 from saved captures and supersede the earlier
+figures.** The "30 fps" RGB rate was a bandwidth-limited window, not a ceiling; "36 fps each" for
+mono was a slot rate, not a usable one; "~57 records/s" for the mux was one configuration. Full
+measurements, the corrected numbers and the open items are in **`docs/15-shipping-plan.md`**, which
+is now the planning reference for this track.
+
+**The blocking gap is time, not framing.** No camera endpoint exposes a timestamp in the library
+API, and the mux u64 at `+20` is not a fixed-frequency clock: ticks-per-record ranges 148,867 →
+18,573,604 across 33 saved captures. `include/meta2/mux.h` documents "unit is ~1.2e8 per second";
+the only wall-clock-anchored captures give **12.03–12.12 MHz**. That header constant is wrong and
+must not be built on. See `docs/15-shipping-plan.md` §2.
+
+**The active track from here is: ship this as the tracking front end** — but only after the clock
+question is settled. Mono at ~27 usable fps × 2 plus RGB at up to ~52 fps plus dual IMU is a
+legitimate VIO input set **if and only if** a stable device clock exists and the mono A/B pair is
+simultaneous. Neither is established.
 
 ---
 
@@ -136,6 +150,9 @@ computed inside the FPGA with EP `0x84` as a result stream; hardware/SDK stub.
 ---
 
 ## 5. Open questions on the tracking path (the new main line)
+
+Ranked, with the closing experiment and its cost, in **`docs/15-shipping-plan.md` §3**. The list
+below is kept for continuity; item numbering there differs.
 
 1. **Is EP `0x82` A/B a usable stereo pair?** `[VERIFIED]` both sub-streams correlate with EP `0x83`
    (0.472 / 0.252 against a 0.04–0.07 shuffled baseline), but A and B correlate only weakly with each
