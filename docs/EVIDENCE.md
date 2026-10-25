@@ -1656,3 +1656,22 @@ The logging proxy is `[VERIFIED]` only structurally: 130/130 exports identical t
 valid x64 DLL, stubs disassembled to confirm log-then-forward. It has not been run against the
 device. `[RULE]` Do not describe it as working until `resolved 130/130 real exports` appears in
 `cyapi_calls.log` on the target machine.
+
+## 34. The M2450 modulation frequency set is 30 / 60 / 20 / 99.5 MHz (2026-10-25)
+
+`royale::imager::ImagerM2450::initialize` inserts exactly four modulation frequencies with indices
+0..3: 30 MHz, 60 MHz, 20 MHz, 99.5 MHz. `[VERIFIED]` Ghidra 12.2 decompilation, literal constants.
+
+`ModPllStrategyM2450_A12::pllSettings` accepts `12.6 MHz <= f <= 400 MHz` and emits three packed
+`ushort` words computed from a 24-bit fractional divider. `[VERIFIED]` There is no frequency table
+to find.
+
+Withdraws part of §12.32: the `0x9802` lock bit polarity was recorded backwards from raw
+disassembly. `(value & 0x04) != 0` is the **failure** condition. `[VERIFIED]`
+
+Confirms the address-space bridge that §12.26 had to assume: `0xb0ad`, `0xb007`, `0xb062` are
+written/read by Royale by number and already appear in the host arm transcript. `[VERIFIED]`
+
+Still not claimed: that the fixed 2.4876 m shell is the 60 MHz ambiguity ceiling. The 0.43 % match
+is now between a measured radius and a frequency the SDK really knows about, which is a better
+coincidence than before and still not evidence. `[INFERRED]`

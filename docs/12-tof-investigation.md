@@ -1360,3 +1360,89 @@ Package: `meta2_win_probe_v5.zip`, 240,516 B,
 sha256 `adf6e5a85f039df03122da181561737148c6ed7c942676b8719bcabc580aa9f9`. It installs the proxy,
 self-tests, runs the probe, harvests, and restores the genuine `cyapi.dll` on every path including
 failure, printing both SHA-256 hashes so the restore is checkable.
+
+### 12.35 Ghidra decompilation: the imager's own frequency set, and the address-space bridge confirmed
+
+Ghidra 12.2 headless (`support/analyzeHeadless`, needs JDK 25) analysed `royale.2.3.1.dll`:
+**22,100 functions**, and after offline export-thunk resolution (`artifacts/resolve_thunks.py`,
+4,564 of 11,209 thunks mapped to real bodies) **4,862 functions decompiled** to
+`artifacts/royale_decompiled.c` (7.4 MB). Ghidra names the 5-byte export trampolines straight from
+the export table, so a name search alone finds only stubs — the thunk resolution is mandatory.
+
+**The M2450 modulation frequency set is exactly four values.** `royale::imager::ImagerM2450::initialize`
+(`0x18000fffb`) inserts four frequencies into the config map with indices 0..3:
+
+| index | modulation frequency | unambiguous range `c/(2f)` |
+|---|---|---|
+| 0 | 30,000,000 Hz | 4.9965 m |
+| 1 | 60,000,000 Hz | 2.4983 m |
+| 2 | 20,000,000 Hz | 7.4948 m |
+| 3 | 99,500,000 Hz | 1.5055 m |
+
+`[VERIFIED]` — literal constants in the decompiled function.
+
+This is the first time 60 MHz appears as something the SDK itself knows about, rather than as an
+arithmetic guess from the shell radius. The measured IR-74 shell hard max `2.4876 m` sits `0.43 %`
+under `c/(2 × 60 MHz) = 2.4983 m`. That strengthens the ambiguity-ceiling lead. It still does **not**
+prove the shell is an ambiguity ceiling — the shell could be a clamp, a default, or a fallback.
+`[INFERRED]`, weak-to-moderate.
+
+**The modulation PLL is a computed 24-bit fractional divider.** `ModPllStrategyM2450_A12::pllSettings
+(double fmod, bool, vector<ushort>&)` (`0x180013c14`):
+
+- rejects `fmod < 12,600,000` or `fmod > 400,000,000` (`[VERIFIED]` constants `0x1802d32b8`,
+  `0x1802d32c8`) — so the allowed modulation range is 12.6 MHz … 400 MHz;
+- reads the imager reference clock from `this+8`; if it exceeds 20,000,000 it halves it;
+- computes a divider and a 24-bit fractional word (masked `& 0x7fffff`, with a two's-complement
+  path for the negative case);
+- emits **three `ushort` words** into the vector, packed as nested bit fields, e.g.
+  `((((short)dVar16*2 | uVar15) << 3 | (dVar4 - 1.0)) << 7 | (dVar2*0.5 - 2.0)) << 2 | bVar6`
+  and `(((sVar10*2 | flag2)*2 | flag3^1)*2 | flag4) << 8 | (frac >> 16) & 0xff`.
+
+So there is no frequency table to find because the register words are *derived* from the requested
+frequency. `[VERIFIED]` from decompiled source. Reproducing this arithmetic is now a concrete task
+for `meta2lib`; the constants involved are `12.6e6`, `400e6`, `20e6`, `19.0`, `16.0`, `2.0`, `5.8`,
+`4.0`, `21.0`, `1.0`, `0.5`.
+
+**The DPHY PLL is separate from the modulation PLL.** In `ImagerM2450::initialize` the DPHY path runs
+only when the configured reference clock is **not** 26,000,000 Hz, calls
+`DphyPllStrategyM2450_A12::pllSettings(133333333.3 * 3.0, false, vec)` — i.e. a 400 MHz target —
+logs `Reconfiguration of DPHY PLL to ...`, and then `writeImagerBurst(0xb062, vec)`.
+`[VERIFIED]`.
+
+**The address-space bridge is no longer an assumption.** `ImagerM2450::initialize` (`FUN_1800f0d30`)
+does:
+
+```
+readImagerRegister(0xb0ad)   ; must equal 0xa12 else throws "wrong design step"
+readImagerRegister(0xb09e)   ; if bit 0x4 -> imager+0x228 = 0xb00079
+maskedWriteRegister(0xb007, 0x3e0, 0x180)   or (0xb007, 0x7c00, 0x3000)
+writeImagerRegister(0xc401, 1)
+writeImagerRegister(0xc400, 1)
+readImagerRegister(0xc40f)
+readImagerRegister(0x9802)
+writeImagerRegister(0xc401, 2)
+writeImagerRegister(0xc40d, 0x8012)
+```
+
+Our host arm transcript already contains `3d 21 b0ad ffff`, `3d 21 b007 ffff` and `3d 21 b062 ffff`
+with 16-byte masks. Those are the same 16-bit register space the host `bRequest 0xC0` primitive
+addresses. `[VERIFIED]` — this closes the caveat that had been carried since §12.26.
+
+**Lock polarity corrected.** `FUN_1800f2590` reads `0x9802` and throws `error modpll lock` when
+`(value & 0x04) != 0`. So **bit 0x04 SET means NOT locked** — the opposite of what the raw
+disassembly reading in §12.32 recorded. `[VERIFIED]` from decompiled source. IR-76's decision table
+was rewritten accordingly.
+
+**A burst is just consecutive single-register reads.** `BridgeSAQBase::readImagerBurst(ushort addr,
+vector<ushort>& out)` loops `vtable+0x10(this, addr + i, &out[i])` over the vector length. No new
+wire primitive is needed to read a burst. `[VERIFIED]`
+
+### 12.36 Next host-side experiment this unlocks (IR-77, not yet run)
+
+The vendor's own imager-init register sequence above is short, fully enumerated, and uses only the
+register primitive we already control. IR-77 should replay `0xb007` masked writes, `0xc401=1`,
+`0xc400=1`, `0xc40f` read, `0x9802` read, `0xc401=2`, `0xc40d=0x8012` **in place** inside the
+working arm, bracketed by unmodified-arm controls, and test the single success metric: does EP `0x84`
+become scene-responsive (hand at 10 cm vs 1 m) under a fixed arm? IR-76 (read `0x9802` under the
+current arm) runs first and costs one session.
