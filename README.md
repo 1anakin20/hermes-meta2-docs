@@ -11,7 +11,7 @@ and build their own software for it.
 
 ## Start here
 
-**[docs/HANDOFF.md](docs/HANDOFF.md)** is the current resume point: what is done and shippable,
+**[docs/14-project-state.md](14-project-state.md)** is the current resume point: what is done and shippable,
 what the ToF branch proved, where it stopped, and the exact next experiment if ToF is picked up
 again. Read it before anything else.
 
@@ -29,7 +29,7 @@ mono cameras), `0x83` (YUV422 1280×720) and `0x84` (352×288 16-bit ToF framing
 
 **Not solved:** the ToF camera produces no scene range data in any path tried so far — host-only
 arm, VM SDK, and physical PC SDK. Investigation paused 2026-10-25 with a concrete lead
-(five arm transfers whose payloads were never captured); see [docs/HANDOFF.md](docs/HANDOFF.md) §4
+(five arm transfers whose payloads were never captured); see [docs/14-project-state.md](14-project-state.md) §4
 and [docs/12-tof-investigation.md](docs/12-tof-investigation.md) §12.46.
 
 Other open items are listed in [docs/07-open-questions.md](docs/07-open-questions.md).
