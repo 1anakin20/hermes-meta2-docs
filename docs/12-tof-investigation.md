@@ -1864,3 +1864,66 @@ plus three stack-argument slots.
 and restores both genuine DLLs on every exit path. `impl_selftest.exe` deliberately calls **no**
 export — calling `meta2_host_impl` without a connected headset can crash — and instead proves the
 proxy loads, the genuine DLL is staged at `real\`, and all 2896 exports resolved.
+
+### 12.45 — IR-83: the semantic device transcript (v9 on the physical desktop)
+
+The `meta2_host_impl.dll` proxy worked first try. `meta2_impl_calls.log` (74,807 B): self-test load
+`resolved 2896/2896`, then the probe process logged **148 calls** and unloaded cleanly.
+
+**Timing is the headline.** Every device command happened in the first 8.1 s (arm) and the last
+2.4 s (teardown). Between 13:39:37 and 13:46:29 — seven minutes of full-rate streaming, ~160 MB/s
+across EP `0x82/0x83/0x84` — the device layer issued **zero** commands. The arm is the entire
+control conversation; streaming is pure bulk.
+
+**Semantic sequence (condensed, measured).** `SAQUSBCls` ctor → `RegisterDisconnectEvent` →
+`ConfigureMonoCameras` ×2 → `Data_RegisterNewMonoFrame` ×2 → `ConfigureRgbCamera` →
+`Data_RegisterNewRgbFrame` → `ConfigureRawImu` ×2 → `Data_RegisterNewRawImuFrame` ×2 →
+`Ui_RegisterButtonStateChange` → `Connect` → `ConfigureTofCamera` → `Data_RegisterNewFarDepthFrame`
+→ 47 × `WriteI2C` interleaved with 49 × `ReadI2C` (all `dev=0x3D`) → 4 × `SetGPIO` →
+2 × `ReadFromSPIMemory(dev=8, addr=0x30000)` → `GetVersionInfo` →
+`System_RegisterNewTemperatureMeasurement` → `StartSystem` → `StopSystem` → `ReadUnitSerialNumber`
+→ … 7 min silence … → teardown `WriteI2C b007`, `WriteI2C a880`, `ReadI2C a881`, `ReadI2C 0204`,
+`StopSystem`, `Disconnect`, `SAQUSBCls` dtor.
+
+**Mapping to the wire arm we already replay.** `SetGPIO(12,0) (13,0) (12,1) (13,1)` is exactly arm
+entries `#18 #21 #24 #27` (`wValue=4`, payloads `0c00 0d00 0c01 0d01`).
+`ReadFromSPIMemory(dev=8, addr=0x30000)` is the `wValue=3` wide device-file family at arm
+`#201–#213` (`wIndex` 2336 / 608 / 608 / 608 / 338).
+
+**Value-level verification.** Matching each `WriteI2C(dev, reg, buf)` argument dump against the arm
+write for the same register, consumed in order: **47 vendor writes, 46 matched byte-for-byte**
+(the 47th, `0xc2bc`, matched over the full 32 bytes the proxy dumps; its arm payload is 40 bytes).
+Registers confirmed identical include `b007 0180`, `a893 224113b203bb204113b103bb4459c4ec0bce`,
+`b00e 1515151515151515151515151315151315150415`, `b062 a3c35568…aaaa032a`,
+`a882 0280105700000004`, `a886 0000015f00010120`, `c2bc 004e00002000000008d3…`,
+`c35e/c363/c368/c36d 552955554e15c71b0000`, `c352 68391b4f03e880453d71060a`,
+`bff8 0800072b…0a2a`, `c035 0001`, `c036 8000`, `c2c0/c2c4/c2c8 07f1`, `c2cc 07f103b7`.
+Every arm write has a vendor counterpart.
+
+**The one vendor-only command:** `WriteI2C dev=0x3D reg=0xb800`, payload beginning
+`08d106c100d0060400d00f0d0218089004420a0200b00c40`. Our arm has no `0xb800` write. Note it is not
+the same bytes the device reports: IR-66's read of `0xb800` returned
+`0800080008cc0e27006100cd066b…`. So the band content the device answers with is not the program
+image the SDK writes — consistent with IR-68's observation that part of the band changes regardless
+of what is written.
+
+**Closed by this transcript.** No `SetExposure`, `GetExposure`, `ConfigureLed`, `GetAnalogGain` or
+`SetAnalogGain` call appears anywhere in a healthy SDK session. Illumination is driven only through
+the `0xa88x` / `0xb0xx` register writes we already replay. No new wire primitive family exists.
+
+**Proxy defects found from this run (both fixed in the rebuilt proxy).**
+1. Stack arguments were captured 40 bytes off: the stub did `mov r15, rsp` *after* pushing five
+   registers, so `s5/s6/s7` were the stub's own saved `r14/r13/r12`, not the caller's stack args.
+   Proof in the log: `s7` equalled the saved `r8` (the register address, e.g. `B00E`) on every I2C
+   call. Fixed to `lea r15, [rsp+40]`. Consequence: the `len` argument of `WriteI2C`/`ReadI2C` was
+   never recorded, so the vendor's `0xb800` write length is still unknown.
+2. Argument dumps were 32 bytes; widened to 64. Rebuilt proxy 1,788,042 B, exports re-verified
+   2896/2896 identical.
+3. Cosmetic: the `#<n>` per-log sequence counter is never incremented (always `#1`) and the `cnt=`
+   field prints garbage — call counts must be taken from a line count, not from `cnt=`.
+
+**Decision.** The stop-ToF rule fires. The vendor's wire commands are reproduced by our host arm
+byte-for-byte except one `0xb800` program write, and that band was already proven inert for EP
+`0x84` by IR-63 and IR-68; the physical SDK produced zero wall depth (IR-74) and `pc_nz = 0` across
+a full healthy run (IR-82); and no command is issued while streaming. Next work moves to
+`meta2lib`: RGB `0x83`, mono `0x82`, IMU, and EP `0x84` framing.
