@@ -1299,3 +1299,64 @@ read `0x9802`, `0xc035`, `0xc036`, `0xc400`, `0xc40f`. Predictions: if `0x9802` 
 under host arm while EP `0x84` still streams, the modpll is unlocked and EP `0x84` is the unlocked
 fallback pattern — which would be the cleanest explanation yet for IR-61b's device-fixed pattern.
 If it is already set, this hypothesis dies and the search moves to the use-case packet itself.
+
+### 12.33 The entire USB wire surface is 7 imports, and it is all `XferData`
+
+Read out of the PE import tables rather than assumed:
+
+- `cyapi.dll` imports `CreateFileA`, `DeviceIoControl`, `GetOverlappedResult`, `CloseHandle`
+  from `KERNEL32.dll`, plus `SetupDiEnumDeviceInterfaces` / `SetupDiGetDeviceInterfaceDetailA`
+  from `SETUPAPI.dll`. It imports **no WinUSB**. All device I/O is `DeviceIoControl` to the
+  KMDF driver. `[VERIFIED]`
+- Across the whole SDK, **only `royale.2.3.1.dll` imports `cyapi.dll`**, and it imports exactly
+  seven exports:
+
+  ```
+  ??0CCyUSBDevice@@QEAA@PEAXU_GUID@@H@Z        CCyUSBDevice(char*, GUID, int)
+  ??1CCyUSBDevice@@QEAA@XZ                     ~CCyUSBDevice()
+  ?Close@CCyUSBDevice@@QEAAXXZ                 Close()
+  ?DeviceCount@CCyUSBDevice@@QEAAEXZ           DeviceCount()
+  ?EndPointCount@CCyUSBDevice@@QEAAEXZ         EndPointCount()
+  ?Open@CCyUSBDevice@@QEAA_NE@Z                Open(unsigned char)
+  ?XferData@CCyUSBEndPoint@@QEAA_NPEAEAEAJPEAVCCyIsoPktInfo@@@Z
+  ```
+
+  `[VERIFIED]`
+- `cyapi.dll` itself exports 130 names, of which 5 are RTTI data symbols (`??_R0?AV...@8`).
+  `[VERIFIED]`
+
+Consequence: Royale opens the device once and then does **everything** — control transfers and
+bulk transfers alike — through `XferData(uchar* buf, long long& len, CCyIsoPktInfo*)`. A single
+interception point sees the whole wire. `[INFERRED]`, strong: it follows directly from the import
+list, but the actual call sequence is what the capture must show.
+
+`CCyControlEndPoint::Read` and `::Write` are `bool(uchar*, long long&)` in this build — the
+8-byte `USB_SETUP_PACKET` is held in the endpoint object, not passed as an argument. A logger
+that dumps only the arguments will never see the setup packet. `[VERIFIED]` from the mangled
+names.
+
+### 12.34 The logging proxy (IR-75 tool, built and structurally verified)
+
+`re/proxy_gen.py` generates a drop-in `cyapi.dll` with one stub per export that logs and then
+forwards to the genuine DLL at `<bindir>/real/cyapi.dll`.
+
+Built artifact: 267,530 B, x64 DLL, **130/130 export names byte-identical to the vendor DLL**
+(`[VERIFIED]` by comparing both export tables). Stub bodies confirmed by disassembly to
+`log_pre` → call through `g_fn[i]` → `log_post`.
+
+Logging design: `this` 48 B, arg1 64 B, arg2 24 B, arg3 16 B, dumped **before and after** the
+call (reads fill the buffer, so a pre-only dump would miss every inbound payload). Transfers
+whose `long long&` length exceeds 4096 are logged compactly with full hexdumps on every 8th one,
+so a 300-frame/s stream does not turn the log into hundreds of megabytes. Flush is immediate for
+control-ish exports and every 64 lines otherwise, so the logger does not throttle bulk throughput.
+
+Not verified: runtime behaviour against the real device. The build host has no working Windows
+runtime (its `wine` lacks `wine64-preloader` and dies with `could not load kernel32.dll`), so the
+package ships a `proxy_selftest.exe` that resolves the 7 imports Royale needs and a `selftest.bat`
+that checks the proxy's own `REAL ... -> handle` / `resolved 130/130 real exports` log lines before
+the real run is allowed to start. `[RULE]` Never treat the proxy as working without those lines.
+
+Package: `meta2_win_probe_v5.zip`, 240,516 B,
+sha256 `adf6e5a85f039df03122da181561737148c6ed7c942676b8719bcabc580aa9f9`. It installs the proxy,
+self-tests, runs the probe, harvests, and restores the genuine `cyapi.dll` on every path including
+failure, printing both SHA-256 hashes so the restore is checkable.

@@ -1642,3 +1642,17 @@ and tests bit `0x04`. `[VERIFIED]` from disassembly at `0x1800f2658`–`0x1800f2
 Not claimed: that these addresses are the same address space our host `0xC0` register primitive
 addresses. That is `[INFERRED]` and is exactly what IR-76 must test before anything else is built on
 it.
+
+## 33. The cyapi.dll wire surface is 7 imports and one transfer function (2026-10-25)
+
+Only `royale.2.3.1.dll` imports `cyapi.dll` anywhere in the SDK, and it imports 7 exports, of
+which the only data-transfer one is `XferData(uchar*, long long&, CCyIsoPktInfo*)`. `cyapi.dll`
+imports no WinUSB; it uses `CreateFileA` + `DeviceIoControl`. `[VERIFIED]` from PE import tables.
+
+`CCyControlEndPoint::Read/Write` take `(uchar*, long long&)`, so the setup packet lives in the
+endpoint object. `[VERIFIED]` from mangled names. This is why the logger hexdumps `this`.
+
+The logging proxy is `[VERIFIED]` only structurally: 130/130 exports identical to the vendor DLL,
+valid x64 DLL, stubs disassembled to confirm log-then-forward. It has not been run against the
+device. `[RULE]` Do not describe it as working until `resolved 130/130 real exports` appears in
+`cyapi_calls.log` on the target machine.
