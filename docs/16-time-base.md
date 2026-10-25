@@ -3,17 +3,25 @@
 Phase 1 of `docs/15-shipping-plan.md`. Question: can RGB frames, mono frames and IMU
 samples be put on one clock?
 
-Measured in gate-certified sessions with `meta2lib examples/meta2_capture_live.c …
-gate tries=5 probe=4 clock`, 12 s windows, all four endpoints, warm mask `0x7e`,
-fast sustain. Two sessions are quoted throughout because the difference between them
-is itself the finding:
+Measured with `meta2lib examples/meta2_capture_live.c … gate tries=5 probe=4 clock`,
+12 s windows, all four endpoints, warm mask `0x7e`, fast sustain. Two sessions are
+quoted throughout because the difference between them is itself the finding — and they
+are **not the same kind of session**:
 
 | | session A | session B |
 |---|---|---|
 | reader queue | 1 | 8 |
+| gate | **accepted**, attempt 2 of 5 | **rejected on all 5 attempts** (coverage 23.2 / 2.5 / 7.5 / 2.6 %) |
+| state | healthy | starved |
 | mono fragments/s per tag | 11,669 | 496 |
 | mono complete frames | 41.7 % | 75.8 % |
 | mux records | 4,215 | 384 |
+
+Session B is the last attempt, which the tool analyses rather than discards. Its
+numbers are therefore a **starved-session** measurement. That turns out to strengthen
+§16.1 rather than weaken it: the quantity that mattered did not change between a
+healthy and a starved session. Session A's own accepted verdict was coverage 111.6 %,
+i.e. its mux span exceeded its window — see §16.4.
 
 ---
 
@@ -32,9 +40,10 @@ real inter-fragment interval and needs no wrap correction.
 | neighbour pairs | 137,029 (97.8 %) | 5,879 (98.8 %) |
 | delta p10 / median / p90 | 8,913 / **9,204** / 9,205 | 8,913 / **9,204** / 9,205 |
 
-The delta distribution is **identical in two sessions whose fragment rates differ by
-23.5×**. A wall clock would give a delta proportional to the rate; this one does not
-move at all. The field advances by a fixed ≈9,204 ticks per fragment delivered.
+The delta distribution is **identical in a healthy session and a starved one whose
+fragment rates differ by 23.5×**. A wall clock would give a delta proportional to the
+rate; this one does not move at all, and it does not move between session states
+either. The field advances by a fixed ≈9,204 ticks per fragment delivered.
 
 Consequence, and it is the load-bearing one: **mono timestamps order samples and
 measure gaps in sample units, but they do not tie mono to real time by themselves.**
@@ -81,8 +90,8 @@ exactly `1,843,232` B apart (session A: 611 frames, 333 adjacent pairs):
 | +24 | 427,890,053 | 133,827,327 | [253, 4,294,967,291] | no stable delta |
 | +28 | 427,761,285 | 4,160,684,293 | [64,769, 4,294,967,295] | no stable delta |
 
-Session B gives the same picture (`+4/+8/+12` constant, `+20` counter, `+24/+28`
-spanning the whole u32). The `+24`/`+28` pair was also read as one 64-bit value, in
+Session B (starved) gives the same picture (`+4/+8/+12` constant, `+20` counter, `+24/+28`
+spanning the whole u32), so the absence of an RGB timestamp is not an artifact of session state. The `+24`/`+28` pair was also read as one 64-bit value, in
 case RGB carried its clock the way the mux record does; the apparent u64 fields at
 `+8`, `+16`, `+20`, `+24` are arithmetic artifacts of combining adjacent u32s (the
 `+16` u64 delta is exactly 2³², i.e. the counter crossing into the high word), not
