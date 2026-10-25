@@ -94,7 +94,63 @@ Consequences, all `[VERIFIED]`:
 - 752 is the correct raster width: a lag scan over 4.3 M samples ranks **lag 752** first
   (mean |diff| 11.92, ratio 0.051 against a permutation baseline). `[VERIFIED]`
 
-## 10.5 Microphones still do not appear
+## 10.5 All four endpoints at once, usable for tracking (2026-10-25)
+
+`examples/meta2_capture_live.c` now has the two controls `capture_mask.py` had and it did not: a
+warm-up phase in a chosen mask, and a selectable sustain mode. EP `0x84` is drained and **discarded**
+— its only job is to stay serviced, because §10.2 showed an undrained endpoint back-pressures mono.
+Accumulating it instead fills the ring and the drain loop stops servicing it, which reintroduces the
+problem.
+
+Recipe that works: port reset + full arm → readers pending on **all four** endpoints before any
+control traffic → warm-up holding mask `0x7e` for 4 s → sustain = assert+deassert as fast as
+possible → keep all four serviced for the whole session.
+
+Five consecutive runs, queue 8, read_size 65536, mask `0x7e`, mux `0x1b`, 8 s windows, `host dropped
+bytes = 0` on mono/rgb/mux:
+
+| run | mono complete | mono complete fps/camera | EP `0x83` | EP `0x81` records/s |
+|---|---|---|---|---|
+| 1 | 33.5% | 41.5 | 60.9 MB/s | 375.9 |
+| 2 | 69.2% | **76.6** | 84.1 MB/s | 236.6 |
+| 3 | 55.5% | 72.6 | 85.0 MB/s | 280.3 |
+| 4 | 74.0% | 47.7 | 58.4 MB/s | 46.4 |
+| 5 | 75.0% | 3.0 | 3.5 MB/s | 46.6 |
+
+`[VERIFIED]`
+
+**Mono is the good news: 41–77 complete frames/s per camera with every endpoint drained at once**,
+against the 27 fps `docs/15` quotes and the 34.6 fps the two-endpoint configuration gives. The
+frames that arrive are whole, so they carry no tearing.
+
+**RGB is 58–85 MB/s in four of five runs** — above the 41–49 MB/s measured in §40, and above the
+55 MB/s that produced the old "30 fps" figure.
+
+Two things are not settled:
+
+1. **Run 5 is a dud** — 3.5 MB/s on EP `0x83`, 3.0 fps mono. Same binary, same recipe. This is the
+   hysteresis of §10.3, not a new failure mode. `[OPEN]` what distinguishes a run that enters the
+   fast state from one that does not.
+2. **The mux rate is bimodal**: 46.4 / 46.6 records/s in two runs (identical byte counts, 95,488 B)
+   and 236.6 / 280.3 / 375.9 in three. For a tracking front end this is the blocking number — 46
+   records/s across two IMUs is ~23 Hz each, 376 is ~188 Hz each. `[OPEN]` which is the device's
+   rate and what selects between them.
+
+**Practical rule for a tracking session:** do not start one on a single arm. Gate on throughput —
+measure the first second after arming and re-warm/re-arm if the endpoints are below a floor, because
+a run like 5 looks identical to a working run until you count bytes.
+
+## 10.6 Measurement bugs that produced wrong numbers in this area
+
+- A greedy drain loop (`drain until the ring is empty`) never returns while data is continuous, so
+  the outer time check is never re-evaluated. An 8 s window measured 24.8 s and every rate derived
+  from it was understated. Bound the inner drain loops by the window as well. `[VERIFIED]`
+- A capture tool that closes its window after the reader joins and the final drain overstates it
+  (13.0 s reported for a 10 s capture). `[VERIFIED]`
+- Warm-up threads must have their own stop flag; sharing the session's `quit` deadlocks the join.
+  `[VERIFIED]`
+
+## 10.7 Microphones still do not appear
 
 Setting the multiplexor mask to `0x1f` (adding bit 2 = Mics) produced **no** `0x88` records:
 645 multiplexor records in `cap_mux2_ep81.bin` carry tags `102` (323) and `119` (321) only.
