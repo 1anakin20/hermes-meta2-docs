@@ -1736,3 +1736,46 @@ ceiling. The deviation is cosmetic for the depth endpoint. `[VERIFIED]`
 
 Net effect on the investigation: wire fidelity is not the missing ingredient. `[VERIFIED]` for EP
 `0x84`; the search for the measuring state continues elsewhere.
+
+## 39. Mono dropped frames: the frame record is byte-exact, and the loss is feed cadence, not URB queue depth (2026-10-25)
+
+The mono frame record is exactly **721,952 bytes**: a 32-byte descriptor followed by 721,920 bytes
+of `752 x 480` u16 samples. Measured as the byte distance between consecutive descriptor starts in
+the per-tag data stream, it came out identical 452 times out of 453 in one capture. `[VERIFIED]`
+
+This confirms `META2_MONO_FRAME_BYTES + 32` and the existing delimiter in `src/mono.c` were correct
+all along. There is no mono parser bug. `[VERIFIED]`
+
+The descriptor sits at a different offset inside each 4,096-byte fragment because 721,952 / 4,096 =
+176.25, so the frame grid does not align to the fragment grid. That is why it looked like a marker
+drifting through the image data. `[VERIFIED]`
+
+Dropped frames are the device shortening a frame record, not the host losing fragments. Fragment
+counters stay contiguous across the whole capture; a lost frame shows up as a short distance between
+descriptors, which is invisible in a byte count. `[VERIFIED]`
+
+What actually moved the number was the cadence of the feed commands. One arm, then a steady-state
+window, mask `0x7e`, mux `0x1b`, EP `0x82`:
+
+| sustain pattern | reader | EP `0x82` | complete frame records |
+|---|---|---|---|
+| assert then deassert, as fast as possible | sync, 65536 B | 55.5 MB/s | 51 of 412 = 12.4% |
+| assert then deassert | async, queue 8 | 9.0 MB/s | endpoint starved |
+| assert only, no deassert | sync, 65536 B | 61.8 MB/s | 130 of 236 = 55.1% |
+| assert only, no deassert | async, queue 8 | 63.2 MB/s | 132 of 239 = 55.2% |
+| none | async, queue 8 | 0.0 MB/s | endpoint idle |
+| replay the whole arm | async, queue 8 | 0.0 MB/s | streaming collapses |
+
+`[VERIFIED]` for the six rows above. Neither reader produced a single transfer timeout.
+
+Withdrawn: "queued URBs are the fix for dropped frames." `[WITHDRAWN]` Queue depth 1 versus 8 gave
+55.1% and 55.2% completeness with everything else held constant. The earlier 12.4% versus 99.8%
+contrast compared a keep-alive loop against the arm sequence itself, which is a cadence difference,
+not a queue difference.
+
+Best number seen anywhere: 452 of 453 frame records complete (99.8%), about 54 complete frames/s per
+camera, in a window that was the first arm sequence. Not reproduced in a steady-state window.
+`[OPEN]` which feed cadence reproduces it.
+
+Practical effect today: removing `meta2_feed_disable()` from any keep-alive loop raises mono from
+8.5 to 31.7 complete frames/s per camera. `[VERIFIED]`
