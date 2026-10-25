@@ -126,11 +126,55 @@ image data. So RGB does have a per-frame device timestamp; §16.3 swept only the
 *start* of the record. Same driver source gives the mono header its own timestamp-like field at
 `h+4` (observed `0xD0B254DF`).
 
-`[VERIFIED]` that the driver defines these fields. `[UNMEASURED]` whether the trailer's
-`TimeStampHi/Low` is one coherent time base across EP `0x81`/`0x82`/`0x83`. That, not the stall
-experiment, is the next measurement.
+`[VERIFIED]` that the driver defines these fields.
 
-## 16.4 The mux timestamp is neither clock nor counter
+### 16.3.2 Where the trailer actually sits, measured on saved captures
+
+`scratch/trailer_scan.py` and `scratch/trailer_ts.py` over `burst83.bin`, `ir17_ep83.bin`,
+`probe2_ep83.bin`, `probe_arm_strobe_ep82.bin`: in **all 122** `baabedfe` hits the driver's trailer
+pattern sits exactly **8 bytes after** the magic - never at the end of the record. The driver returns
+`i - 16`, so its 32-byte block starts 8 bytes *before* the magic:
+
+```
+magic-8   TimeStampHi        TimeStampLow     <- the 64-bit timestamp
+magic-4   SentinelHi         SentinelLow      <- SentinelHi IS the baabedfe magic; SentinelLow IS the tag pair
+magic+0   ba ab ed fe        tag u16 x2       <- what this project has been calling the record header
+magic+8   EF BE AD DE 0D F0 DD DA 00 00 00 00
+magic+20  PacketInformationHi   PacketInformationLow
+magic+28  samples begin
+```
+
+The block is a **boundary**: it closes the previous frame and heads the next, which is why the driver
+finalises a frame on reaching it. What has been treated as the record header magic is the middle of
+the trailer.
+
+**RGB does have a device timestamp.** `probe2_ep83.bin`, 25 records, byte distance between magics
+exactly 1,843,232 in all 24 gaps (100% complete frames, `probe2.log`: 12.0 s, 3.94 MB/s, 13 timeouts):
+
+```
+ts deltas:  min 3,927,220   median 3,927,221   max 3,927,227   negative 0/24
+PacketNum:  38929, 38930, 38931, 38932 ...     +1 per record
+isHdr:      0 in every record;  FixedSentinels deadbeef / daddf00d in every record
+```
+
+Mono, same scan: ts deltas median 1,963,229 - **2.0003x smaller than RGB's** - and PacketNum
+interleaves two sequences (500772, 534470, 500773, 534471), i.e. the two cameras. `[INFERRED]` a
+shared time base with a 2:1 relationship; unconfirmed.
+
+These are **device-side bytes**, not host-added: they were read from raw bulk-IN transfers by our own
+libusb code with no Meta driver in the process, and a C# `DataScanner.cs` cannot inject bytes into a
+bulk transfer another process reads from the endpoint.
+
+Still `[OPEN]` the tick-to-second scale. `probe2.log` gives 25 RGB frames in 12.0 s = 2.08 fps, which
+would put the clock at 8.18 MHz - but that assumes frames were evenly spaced in real time in a run
+that delivered 3.94 MB/s with 13 timeouts. A 26 MHz unit (see §16.5) would mean 151 ms per frame =
+6.6 fps, contradicting every RGB rate measured in normal runs (28-52 fps); 120.8 MHz gives 30.8 fps
+and 183 MHz gives 46.6 fps, which bracket the measured range.
+
+Note the shape: mono advances a fixed 9,204 ticks per fragment, RGB a fixed 3,927,221 per frame, both
+invariant to throughput. That is still counter-like, not clock-like. `[OPEN]`.
+
+## 16.5 The mux timestamp is neither clock nor counter
 
 EP `0x81`'s u64 at record `+20`:
 
