@@ -1703,3 +1703,21 @@ never issues. `[OPEN]`
 
 Invalid number, do not reuse: `control_drift_counts = 3.67` from `re/ir76_modpll` — the first control
 pass was starved (`ep84 0.48 MB/s`), so the two controls are not comparable. `[VERIFIED]` defect.
+
+## 37. 13 wide writes in the reference arm are truncated; control IN is a rolling window (2026-10-25)
+
+`len(payload) < wLength` for 13 write-family transfers in `ctrl_seq_full.json` (missing 6, 12 or 24
+bytes each), including `0xb00e`, `0xa882`, `0xa886`, `0xc2bc`, `0xb062`, `0xa893`, `0xbff8`, `0xc352`
+and four `0xc35e/0xc363/0xc368/0xc36d`. `[VERIFIED]`
+
+Our harness sends `wLength = len(payload)`, so the device has been receiving short versions of these
+blocks for the whole investigation. `[VERIFIED]` about what we send.
+
+Grammar fact from the `0xb062` isolation matrix: requesting an IN length the device did not arm
+returns a misaligned rolling window with a data byte posing as the status. `[VERIFIED]`
+
+Withdrawn: IR-78's first result ("the device refuses wide reads of these registers", status `07`, 0
+bytes). That was the wrong IN length, not a device restriction. `[VERIFIED]`
+
+Open: whether completing the truncated blocks — especially the four `0xc3xx` blocks — puts the imager
+into a modulation use case. `[OPEN]`

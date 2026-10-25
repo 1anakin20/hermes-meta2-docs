@@ -1541,3 +1541,71 @@ Also observed: during the byte-for-byte replay, many *non-target* IN slots retur
 `[Errno 32] Pipe error` (arm indices ~293 onward). The target reads all succeeded. Consistent with
 the harness `wLength` caveat in §12.37 — our wide OUTs are not byte-identical to the vendor's, so the
 device does not arm every IN the vendor armed. `[VERIFIED]` that it happened; `[INFERRED]` as to why.
+
+### 12.39 IR-78: the arm's wide writes are truncated, and the control IN returns a rolling window
+
+While cross-checking §12.37 against the transcript, 13 of the arm's wide writes turned out to be
+**shorter than their own recorded `wLength`** — we replay fewer bytes than the vendor sent:
+
+| arm index | opcode | register | vendor data bytes | recorded data bytes | missing |
+|---|---|---|---|---|---|
+| 36 | `0x20` | `0xb062` | 28 | 16 | 12 |
+| 42 | `0x40` | `0xa893` | 30 | 18 | 12 |
+| 60 | `0xa0` | `0xa882` | 14 | 8 | 6 |
+| 84 | `0x60` | `0xb00e` | 32 | 20 | 12 |
+| 159 | `0xc0` | `0xc35e` | 16 | 10 | 6 |
+| 165 | `0xc0` | `0xc363` | 16 | 10 | 6 |
+| 171 | `0xc0` | `0xc368` | 16 | 10 | 6 |
+| 177 | `0xc0` | `0xc36d` | 16 | 10 | 6 |
+| 216 | `0x20` | `0xbff8` | 28 | 16 | 12 |
+| 258 | `0xa0` | `0xa886` | 14 | 8 | 6 |
+| 282 | `0xa0` | `0xc2bc` | 64 | 40 | 24 |
+| 288 | `0xe0` | `0xc352` | 18 | 12 | 6 |
+| 294 | `0xc0` | `0xc363` | 16 | 10 | 6 |
+
+`[VERIFIED]` — computed from `ctrl_seq_full.json` (`len(payload)` vs `wLength`, write opcodes only).
+The four `0xc0` writes at `0xc35e / 0xc363 / 0xc368 / 0xc36d` (stride 5 words, 16 data bytes each)
+plus a fifth `0xc363` write at arm 294 are the strongest candidate yet for the four modulation
+frequency parameter blocks, because `ImagerM2450::initialize` registers exactly four modulation
+frequencies. `[INFERRED]` — the pattern is named, not established.
+
+Every wide write in the arm is followed by a 1-byte IN (ACK) which the harness consumes; that is why
+the truncated arm still streams. `[VERIFIED]`
+
+**IR-78 first attempt (wide read at the vendor's write width): all 13 returned status `07` with 0
+data bytes.** `[VERIFIED]` That is a grammar failure, not a device fact — see below.
+
+**Grammar isolation on `0xb062`** (after a full healthy arm, one read OUT + one consuming IN each):
+
+| mask bytes | OUT bytes | IN requested | status | bytes returned | content |
+|---|---|---|---|---|---|
+| 16 | 20 | 23 | `00` | 16 | exactly what we wrote |
+| 28 | 32 | 23 | `00` | 22 | what we wrote **+ `0001 0000 0002`** |
+| 28 | 32 | 29 | `15` | 28 | same block, shifted, `55212400` prefix, `1555` tail |
+| 16 | 20 | 17 | `21` | 16 | `24000000` prefix, truncated tail |
+| 28 | 32 | 17 | `AA` | 16 | `aa032a00` prefix |
+| 22 | 26 | 23 | `AA` | 22 | window starting mid-block |
+
+`[VERIFIED]`
+
+Conclusion, and it is a methodology rule rather than a device fact: **the control IN endpoint returns
+a rolling window of device memory, not a fresh per-register answer, whenever the requested IN length
+does not match what the device armed.** The tell-tales are a "status" byte that is actually data
+(`0x15`, `0x40`, `0xAA`) and windows that begin before the requested address. `[VERIFIED]` for the
+six cases above; `[INFERRED]` as the general model.
+
+Consequences that must be carried forward:
+1. Reading wider than we wrote **does** recover device-side content: `0xb062` holds `0001 0000 0002`
+   past the 16 bytes we wrote. So the truncated tail is partly recoverable. `[VERIFIED]`
+2. Reads taken after the arm completed show neighbour bleed and value drift — e.g. `0xc2bc` read back
+   `...07f1...` where we wrote `...08d3...` (`0x07f1 = 2033`, within 2 counts of the observed EP `0x84`
+   mean `2035.9`; `0x08d3 = 2259`). `[VERIFIED]` that the bytes differ; `[INFERRED]` that the field is
+   live and tracks the depth distribution.
+3. Any earlier register read-back whose status byte was not `00`, or whose returned length did not
+   match the request, is suspect under this rule. The arm's own 2-byte reads returned status `00` and
+   stable values, so §12.38's table stands. `[VERIFIED]`
+
+Next experiment this points at: pad the truncated writes using the device's own read-back content, at
+the vendor's exact widths, and test the single success metric (hand at 10 cm vs 1 m). If the four
+`0xc3xx` blocks are modulation parameters, completing them is the most direct remaining shot at the
+missing use case.
