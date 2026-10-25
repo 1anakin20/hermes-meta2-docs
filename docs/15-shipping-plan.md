@@ -197,10 +197,14 @@ Out of scope, unchanged: SLAM, rectification, rendering, calibration solving.
 **Phase 0 — no device, no risk.** Items 1–6 above. This is real library work and it is not blocked
 on the headset being connected.
 
-**Phase 1 — one device session, settles the time base.** Open items #1 and #7 in a single run:
-readers pending on `0x81`, `0x82`, `0x83`, host wall clock stamped per URB, 30 s, three repeats.
-This is the highest-value measurement left in the project and everything in a tracking front end
-depends on its answer.
+**Phase 1 — DONE 2026-10-25, answered in `docs/16-time-base.md`.** Run in gate-certified
+sessions via `examples/meta2_capture_live.c … gate tries=5 probe=4 clock`. Result: the mono
+fragment timestamp is a **sample-domain counter** (9,204 ticks per fragment, identical in two
+sessions whose fragment rates differed 23.5×), so it orders samples but does not tie them to
+real time; the mono A/B skew is a **constant 64 fragments**; **RGB carries no device timestamp
+at all** — every 4-byte slot of its 32-byte header is constant, zero, the frame counter, or
+unstructured. The 336.29 MHz mono "clock" quoted earlier is withdrawn as a drain-rate artifact.
+Remaining: per-tag mux clocks on EP `0x81`, and the mono tick→second scale.
 
 **Phase 2 — offline, from saved captures.** Open items #2 and #6. `cap_cold_ep82.bin`,
 `screen_66_ep82.bin`, `ir29_ep82.bin` and `cap_four_ep82.bin` are already on disk; the mono trailer
@@ -209,7 +213,8 @@ timestamps are already inside them. No headset needed.
 **Phase 3 — coached physical session.** Open items #4, #5, #8, and the mono/RGB calibration run for
 #3. Use `re/scene_coach.py` (`:8095`), which waits for the operator's start click.
 
-**Phase 4 — decide the product shape.** If Phase 1 gives a stable clock and Phase 2 shows A/B are
-simultaneous, the library can honestly advertise a VIO input set: mono pair at ~27 usable fps, RGB
-at up to ~52 fps, dual IMU at a measured rate. If either fails, ship it as a capture/transport
-library and say so in the README rather than implying a tracking front end.
+**Phase 4 — decide the product shape.** Phase 1 answered this, partially and against us: A/B are
+**not** simultaneous (constant 64-fragment skew, calibratable) and RGB has **no** device clock.
+So the honest product statement is: mono pair + dual IMU alignable in the mono sample domain with
+a fixed correction; RGB ordered by frame counter only, loosely clocked against the rest. Not a
+full VIO input set. Say that in the README.
