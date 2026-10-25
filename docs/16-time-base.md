@@ -188,10 +188,13 @@ Verified on real captures:
 | `ir29_ep83.bin` (EP 0x83) | 473 | 1,843,232 B frame | 328 → 800, +1 every block | **3,927,233** |
 | `cap_cold_ep82.bin` (EP 0x82) | 1127 | mono frame record, tags alternating | two counters: 798943 (0x44), 832883 (0x55) | 1,963,229 |
 
-**One shared time base.** In the same 12.0 s session (`probe2`), EP `0x81` spanned
-3,484,086,514,210 → 3,484,183,569,161 and EP `0x83` spanned 3,484,086,693,215 →
-3,484,180,946,539. Same axis, first blocks 179,005 ticks apart. Zero negative deltas on
-every endpoint.
+**Same unit, same epoch - but each endpoint runs its own timeline.** In `probe2` (12.0 s) EP `0x81`
+spanned 3,484,086,514,210 → 3,484,183,569,161 and EP `0x83` spanned 3,484,086,693,215 →
+3,484,180,946,539: overlapping ranges, first blocks 179,005 ticks apart. In a later 12 s session
+EP `0x82`/`0x83` started 1.48e9 ticks above EP `0x81`, and RGB produced 2.12e9 ticks while mux
+produced 5.6e7. So the timestamps share a unit and an epoch, but each endpoint's value advances only
+while that endpoint produces. Within one endpoint the deltas are strictly monotonic (EP `0x81`: 0
+negative in 366, 370 and 648 consecutive pairs).
 
 **The RGB tick is a constant.** 3,927,221 / 3,927,221 / 3,927,233 / 3,927,228 ticks per frame
 across four independent captures whose real-time frame rates range 2.1 to 51.9 fps. A fixed
@@ -266,19 +269,80 @@ reordering rather than detecting it.
 Settled:
 - Mono fragment timestamp exists, is stable, and is a **sample-domain** counter
   (9,204 ticks/fragment).
-- Mono A/B skew is a **constant 64 fragments**.
-- RGB has **no** device timestamp.
+- ~~Mono A/B skew is a constant 64 fragments~~ - withdrawn by §16.4.2: the cameras carry
+  identical trailer timestamps.
+- ~~RGB has no device timestamp~~ - withdrawn by §16.3.2: it is in the trailer at `magic-8`.
 
-Open, in priority order:
-1. Per-tag mux clocks on EP `0x81` — is there one device time domain or five?
-2. The mono fragment→sample→frame mapping in device time: 9,204 ticks per fragment
-   is exact, but the tick→second scale is unknown, so mono gaps are currently
-   measurable only in fragments.
-3. Whether the `+24`/`+28` RGB header fields mean anything at all (they are the only
-   unexplained bytes in the record).
+## 16.6 Does the clock advance while the host is not reading?
 
-What this changes in the shipping plan: **tight RGB+IMU fusion is not available from
-device timestamps.** A VIO pipeline built on this library would align IMU to mono
-(in the mono sample domain, with the 64-fragment correction) and treat RGB as an
-ordered but loosely-clocked stream. That is a real limitation to state in the README,
-not to paper over with host arrival time.
+`meta2_capture_live ... pause=N` stops draining **every** reader for N seconds in the middle of
+the window (`PAUSE: every reader held idle for 3.000 s host time at t=11.21 s`), then looks for the
+hole in the trailer timestamps.
+
+Two 14 s sessions with `pause=3`:
+
+| endpoint | blocks | ts span over the 14 s window | largest gap |
+|---|---|---|---|
+| EP `0x81` | 368 / 377 | 55,687,554 / 56,997,479 ticks | 803,050 ticks = 5.5x median, at block 47 / 49 |
+| EP `0x82` | 3209 / 2743 | unreliable, see below | - |
+| EP `0x83` | 650 / 667 | unreliable, see below | - |
+
+**No 3-second hole appears.** The largest EP `0x81` gap is 803,050 ticks and sits at block 47 of 368 -
+nowhere near the pause at t=11.2 s. Even at the lowest candidate tick rate (4.6 MHz) three seconds
+would be 13.8 million ticks, 17x the largest gap observed. `[MEASURED]` the gap is absent;
+`[INFERRED]` the timestamp advances only while the device produces, so a host-side stall stops the
+device's clock along with it.
+
+**Both sessions were gate-rejected** (coverage 7.4-7.7%, mux clock 3.66-3.72 MHz), so this is
+directional, not conclusive: a starved device is already not producing, and "no hole" is the
+expected outcome there. The clean version of this test needs a gate-accepted session.
+
+A second finding falls out of it: **holding the readers idle for 3 s coincides with the session
+going starved.** After these runs the device stayed starved - three further sessions, 15 consecutive
+gate attempts, every one rejected at coverage 2.5% and clock 4.5-4.8 MHz, where the same binary and
+recipe had been accepted at 182-183 MHz earlier the same day. Host-side read stalls are a candidate
+mechanism for the hysteresis in `docs/10-enable-masks.md`, not just a measurement nuisance.
+
+## 16.7 What the time base actually is, and what is still open
+
+`[MEASURED]`
+- Every endpoint carries the same 32-byte trailer with a 64-bit timestamp (§16.4.1).
+- RGB cadence is 3,927,221 ticks/frame in five independent captures, starved and healthy alike.
+- Mono per-camera cadence is 3,926,458 ticks - the same unit as RGB to 0.02%.
+- The two mono cameras share one timestamp and have separate PacketNum counters.
+- Within one endpoint the trailer timestamp is monotonic (0 negative deltas in 366, 370 and 648
+  consecutive pairs on EP `0x81`).
+- On EP `0x81` the trailer timestamp and the mux `+20` field agree to within 1% of span
+  (55,232,971 vs 55,121,250 ticks in one session) - they are the same clock read at two places.
+
+`[INFERRED]`
+- The endpoints share a unit and an epoch but run independent timelines: in one session EP `0x82`/
+  `0x83` started 1.48e9 ticks above EP `0x81`, and RGB produced 2.12e9 ticks while mux produced
+  5.6e7 in the same 12 s window. A single global counter would not do that.
+- The tick rate is ~183 MHz when the device is healthy: the gate's coverage metric is
+  `ts span / window` and healthy sessions measure 0.9944-0.9989, i.e. the mux timestamps span the
+  wall window. Starved sessions measure 0.025 - the same clock delivering 0.3 s of ticks per 12 s.
+
+`[OPEN]`
+1. The tick→second scale has never been measured directly. ~183 MHz is inferred from coverage, and
+   3,927,221 ticks/frame at 183 MHz predicts 46.7 fps for RGB and mono - inside the measured
+   28-52 fps band, which is corroboration, not proof.
+2. Whether the clock is production-coupled in a *healthy* session (§16.6 was measured starved).
+3. Per-tag behaviour on EP `0x81`: the trailer sits once per 256 B record, so the per-tag question
+   may already be answered - measure per tag from the trailer, not from `+20`.
+
+What this changes in the shipping plan: **RGB, mono and IMU can be put on one device axis**, because
+all three carry the same trailer timestamp in the same unit. The axis is not yet calibrated to
+seconds, and it appears to stop when the device stops producing, so gaps in real time are invisible.
+A VIO pipeline can align the three sensors against the trailer clock; converting to seconds needs
+the scale in item 1 above. That is a much stronger position than "RGB is loosely clocked", and it
+should be stated with the calibration gap named.
+
+## 16.8 Measurement bugs found while doing this
+
+`trailer_clock()` in `meta2_capture_live` is trustworthy on EP `0x81` and **not** on EP `0x82`/`0x83`
+in a gated run: the spans come out as 0 with negative deltas of -1.6e9 and absurd magnitudes near
+2^63. Two causes, both known: the queued reader delivers URBs out of order (RGB blocks arrive
+hundreds of records out of sequence), and a gated run concatenates several attempts into one ring.
+`meta2_trailer_dump` on a single-attempt saved capture does not show this - there every gap is `+1`
+with zero negatives. Do not read a gated run's EP `0x82`/`0x83` span as a clock.
