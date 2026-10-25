@@ -174,6 +174,49 @@ and 183 MHz gives 46.6 fps, which bracket the measured range.
 Note the shape: mono advances a fixed 9,204 ticks per fragment, RGB a fixed 3,927,221 per frame, both
 invariant to throughput. That is still counter-like, not clock-like. `[OPEN]`.
 
+## 16.4.1 The clock bytes, found: one 64-bit timestamp on every endpoint
+
+`meta2lib` now has `include/meta2/trailer.h` + `src/trailer.c` and a dump tool
+(`build/meta2_trailer_dump <file.bin>`). It anchors on the fixed sentinel pair
+`0xDEADBEEF`/`0xDADDF00D` and reads the driver's eight u32 fields from 16 bytes earlier.
+Verified on real captures:
+
+| capture | blocks | one per | PacketNum | ts delta median |
+|---|---|---|---|---|
+| `probe2_ep81.bin` (EP 0x81) | 649 | 256 B record, 648/648 gaps exact | 201866 → 202514, +1 every block | 148,601 (range 32,596-790,168) |
+| `probe2_ep83.bin` (EP 0x83) | 25 | 1,843,232 B frame, 24/24 exact | 38929 → 38953, +1 every block | **3,927,221** (range 3,927,220-3,927,227) |
+| `ir29_ep83.bin` (EP 0x83) | 473 | 1,843,232 B frame | 328 → 800, +1 every block | **3,927,233** |
+| `cap_cold_ep82.bin` (EP 0x82) | 1127 | mono frame record, tags alternating | two counters: 798943 (0x44), 832883 (0x55) | 1,963,229 |
+
+**One shared time base.** In the same 12.0 s session (`probe2`), EP `0x81` spanned
+3,484,086,514,210 → 3,484,183,569,161 and EP `0x83` spanned 3,484,086,693,215 →
+3,484,180,946,539. Same axis, first blocks 179,005 ticks apart. Zero negative deltas on
+every endpoint.
+
+**The RGB tick is a constant.** 3,927,221 / 3,927,221 / 3,927,233 / 3,927,228 ticks per frame
+across four independent captures whose real-time frame rates range 2.1 to 51.9 fps. A fixed
+oscillator cannot produce a constant per-frame tick while the frame rate varies 25x, so either
+the tick is a frame counter or the device's own frame rate is what changes. `[OPEN]` - this is
+what the stall experiment settles.
+
+## 16.4.2 Mono A/B are simultaneous - the 64-fragment skew was an artifact
+
+`cap_cold_ep82.bin`, consecutive blocks:
+
+```
+off=226132   tag=0x44 packet=798943  ts=2881450840307
+off=229460   tag=0x55 packet=832883  ts=2881450840307   <- identical
+off=1682068  tag=0x55 packet=832884  ts=2881452803536
+off=1682868  tag=0x44 packet=798944  ts=2881452803536   <- identical
+```
+
+The two cameras carry **the same timestamp** and have **separate PacketNum counters**. So the
+"constant 64-fragment skew" of §16.2 was a property of the u32 per-fragment field, not of the
+cameras. No correction is needed between the mono pair; they are frame-locked.
+
+Mono per-camera cadence is 2 x 1,963,229 = 3,926,458 ticks, which matches RGB's 3,927,221 to
+0.02%. **RGB and mono are on the same frame cadence.**
+
 ## 16.5 The mux timestamp is neither clock nor counter
 
 EP `0x81`'s u64 at record `+20`:
