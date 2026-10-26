@@ -97,6 +97,10 @@ def make_run(dirpath, prefix, seed, dt, nframes=1200, page_fps=59.94,
     prof.write(b"M2BP")
     prof.write(struct.pack("<IIIII", 1, MONO_H, 64, 552, 202))
 
+    # SYNTH_RAW writes full 752x480 u16 frames so tools/bar_frames.py has something to
+    # render. That is 721,920 B per frame and 1200 frames per run: 1.7 GB per synthetic
+    # capture. It filled the disk on the first attempt at it, so it stays opt-in, and a
+    # sweep over several cases should set nframes low or clear the raw files between runs.
     raw = None
     if os.environ.get("SYNTH_RAW"):
         raw = open(os.path.join(dirpath, prefix + ".raw"), "wb")
