@@ -390,3 +390,37 @@ After a replug the device was starved for 10 consecutive attempts at 3.6-4.7 MHz
 Queue depth is **not** the discriminator - both reached OK. The warm-up mask plus fast sustain is.
 Queue 1 is the right choice for timestamp work (in-order ring, monotonic EP `0x81`); queue 8 is the
 right choice for mono completeness.
+
+## 16.11 The stall test, re-run healthy: the clock stops when the host stops draining
+
+Same binary, same arm, `warm=7e fast`, queue 1, 12.0 s window, both runs `health=OK`. The only
+difference is `pause=3`, which holds every reader idle for 3.000 s of host time mid-window.
+
+| run | health | coverage | mux `+20` ts span | records |
+|---|---|---|---|---|
+| control, no pause | OK | 1.1118 | 1,969,732,039 ticks | 4,238 |
+| `pause=3` | OK | 1.1185 | 1,469,630,660 ticks | 4,223 |
+
+**The pause removed 500,101,379 ticks from the delivered span.** Record counts are within 0.4% of
+each other, so the streams are otherwise the same.
+
+Two hypotheses, one prediction each:
+- Clock free-running while the host is idle: the first and last records would still be 12 s apart in
+  device time, so the span would be **unchanged**. Not what happened.
+- Clock advances only while the device produces: the span loses exactly the paused interval.
+  `500,101,379 / 3.000 s = 166.7 MHz` - and the control run's own span/window is
+  `1,969,732,039 / 12.12 s = 162.5 MHz`. Two independent estimates 2.5% apart.
+
+`[MEASURED]` the span drops by a 3.000 s worth of ticks when the readers are held idle.
+`[INFERRED]` the device clock is production-coupled: it does not run while the host is not draining.
+
+That also gives the tick rate from a direct difference measurement rather than an inference:
+**~167 MHz**, against 162.5 MHz from healthy span/window and 203-205 MHz from the gate's
+median-delta x record-rate estimate. The estimators bracket **162-205 MHz**; the pause difference is
+the only one anchored to a known host-side duration, so it is the one to quote, with the bracket
+named.
+
+Consequence for the library: a host-side stall is invisible in the device time base. A VIO pipeline
+cannot use the trailer timestamp to measure a gap it caused itself - it has to notice the gap on the
+host side and either drop the interval or timestamp it with host time. And the device must be kept
+drained: `pause=3` is enough to push it toward the starved state (docs/10 hysteresis).
