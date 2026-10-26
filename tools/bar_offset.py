@@ -42,7 +42,7 @@ its slope in rows-per-frame is the readout time in frame periods.
 
 import json
 import os
-import struct
+import struct, sys, statistics
 import sys
 
 TICK_HZ = 117821900.0          # docs/17: calibrated from a 400 s coached session
@@ -119,7 +119,7 @@ def fit_phase(frames, disp_t, disp_b, T, verbose=False, window=None):
         slack = SLACK
         frames = [r for r in frames if lo - slack <= r["host_wall"] <= hi + slack]
         if len(frames) < 12:
-            return None, 0.0, 0.0, (0.0, 0.0), 0.0, len(frames)
+            return None, 0.0, 0.0, (0.0, 0.0), 0.0, len(frames), 0.0
     levels = [r["mean"] for r in frames]
     lo = min(levels)
     hi = max(levels)
@@ -129,10 +129,16 @@ def fit_phase(frames, disp_t, disp_b, T, verbose=False, window=None):
     L0 = s[max(0, int(0.10 * (len(s) - 1)))]
     L1 = s[min(len(s) - 1, int(0.90 * (len(s) - 1)))]
     if L1 - L0 <= 1e-9:
-        return None, 0.0, 0.0, (lo, hi), 0.0, len(levels)
+        return None, 0.0, 0.0, (lo, hi), 0.0, len(levels), 0.0
 
-    D = disp_t[1] - disp_t[0]
     n = len(disp_t)
+    D = (disp_t[-1] - disp_t[0]) / (n - 1)
+    # The MEAN display interval, not the first one. The page's frame clock is
+    # requestAnimationFrame and individual intervals jitter: in this capture the very
+    # first interval was 15.70 ms against a 16.69 ms mean. Using the first interval as
+    # the period makes the frame-index mapping drift ~240 frames over a 60 s run, and
+    # the alignment search then cannot reach the true shift at all - it reports "no
+    # correlation" on a capture where the target is plainly visible.
 
     import bisect
     last_start = disp_t[-1]
@@ -198,6 +204,7 @@ def fit_phase(frames, disp_t, disp_b, T, verbose=False, window=None):
     # skew between the monitor and this machine plus the drain lag.
     max_shift = int(slack / D) + 40
     best_s, best_score = None, -1.0
+    scored = []
     for sh in range(-max_shift, max_shift + 1):
         acc = 0.0
         cnt = 0
@@ -209,12 +216,41 @@ def fit_phase(frames, disp_t, disp_b, T, verbose=False, window=None):
         if cnt < 0.6 * len(kidx) or sx <= 0 or sb <= 0:
             continue
         score = acc / (cnt * sx * sb)      # Pearson: 1.0 is a perfect match
+        scored.append((score, sh, cnt))
         if score > best_score:
             best_score, best_s = score, sh
+    if verbose:
+        scored.sort(reverse=True)
+        print("    coarse search: max_shift %d, j0 spans %.1f..%.1f, frames %d, n %d"
+              % (max_shift, j0[0], j0[-1], len(kidx), n))
+        print("    top shifts: " + ", ".join("sh%+d corr %+.3f cnt %d" % (s, c, k)
+                                            for c, s, k in scored[:6]))
+        # direct recomputation at sh=-11, to see which ingredient disagrees
+        sh0 = -11
+        xs = []; ys = []
+        for i in range(len(kidx)):
+            j = int(round(j0[i])) + sh0
+            if 0 <= j < n:
+                xs.append(x[i]); ys.append(disp_b[j])
+        mx2 = sum(xs)/len(xs); my2 = sum(ys)/len(ys)
+        num2 = sum((a-mx2)*(b-my2) for a,b in zip(xs,ys))
+        den2 = (sum((a-mx2)**2 for a in xs)*sum((b-my2)**2 for b in ys))**0.5
+        print("    direct at sh=-11: n=%d pearson=%.3f  sx=%.3f sb=%.3f  x range %.2f..%.2f"
+              % (len(xs), num2/den2 if den2 else 0, sx, sb, min(x), max(x)))
+        print("    host_wall range %.3f .. %.3f ; disp_t[0] %.3f ; D %.6f"
+              % (min(r["host_wall"] for r in frames), max(r["host_wall"] for r in frames),
+                 disp_t[0], D))
+        want = {s: (c, k) for c, s, k in scored if -15 <= s <= -5}
+        print("    scores near sh=-11: " + ", ".join(
+            "sh%+d corr %+.3f cnt %d" % (s, want[s][0], want[s][1]) for s in sorted(want)))
+        print("    disp_b[:24]=%s  j0[:4]=%s  x[:4]=%s"
+              % ("".join(str(b) for b in disp_b[:24]),
+                 ["%.1f" % q for q in j0[:4]], ["%.2f" % q for q in x[:4]]))
+        skipped = sum(1 for _ in range(1) if False)
     if best_s is None or best_score < 0.40:
         # Below this the camera is not tracking the target: the screen is not in
         # view, or the scene's own brightness changes are drowning the target.
-        return None, 0.0, 0.0, (L0, L1), best_score, len(levels)
+        return None, 0.0, 0.0, (L0, L1), best_score, len(levels), 0.0
     if verbose:
         print("    frame alignment: camera frame k <-> displayed frame %+.1f%+d, "
               "correlation %.3f" % (j0[0], best_s, best_score))
@@ -268,6 +304,124 @@ def fit_phase(frames, disp_t, disp_b, T, verbose=False, window=None):
         print("    levels %.1f..%.1f  fitted L0=%.1f L1=%.1f  rms=%.2f  corr=%.3f"
               % (lo, hi, L0, L1, rms, corr))
     return t_ref, rms, corr, (L0, L1), best_score, len(levels), sigma
+
+
+def shutter_test(by_tag, fitted, disp_t, disp_b, T, h, window):
+    """Read the shutter model off the seq frames themselves.
+
+    A frame whose exposure window straddles a bright/dark boundary integrates part
+    bright and part dark. What distinguishes the two shutter models is the SHAPE of
+    that partial light across the frame, not its amount.
+
+    Global shutter: every row integrates the same window, so a frame's residual is the
+    monitor's footprint in the recorded band scaled by one number. Every straddling
+    frame has the SAME shape.
+
+    Rolling shutter: rows integrate at staggered times, so the bright/dark boundary
+    lands at a different row in every frame. The shapes stop matching.
+
+    Two groups are measured. Frames whose exposure contains NO display transition
+    (bright fraction near 0 or 1) look the same under either model - they are the
+    control. Only straddling frames can separate the models. Comparing the two makes
+    the test self-calibrating: if the room itself is unstable, both numbers fall
+    together and the honest answer is "inconclusive", not "global".
+
+    An earlier version compared a uniform model against the best two-level step model.
+    That is biased towards "rolling" - under a global shutter the residual is the
+    monitor's footprint, which a step model fits well too - and a real capture scored
+    48% against a 50% threshold, so the verdict came out of noise.
+    """
+    import bisect
+    n = len(disp_t)
+    D = (disp_t[-1] - disp_t[0]) / (n - 1)
+    last = disp_t[-1]
+    print("\nSHUTTER TEST from the seq frames (no bar needed)")
+    for tag in sorted(fitted):
+        t_ref = fitted[tag][0]
+        v = [r for r in by_tag[tag]
+             if window[0] - SLACK <= r["host_wall"] <= window[1] + SLACK]
+        v.sort(key=lambda r: r["ts"])
+        if len(v) < 60:
+            continue
+        kidx = frame_index(v)
+        bg = [sum(r["profile"][i] for r in v) / len(v) for i in range(h)]
+        fracs = []
+        for k in kidx:
+            a = t_ref + k * T
+            b = a + T
+            jj = max(0, bisect.bisect_right(disp_t, a) - 2)
+            acc = span = 0.0
+            while jj < n:
+                s0 = disp_t[jj]
+                s1 = disp_t[jj + 1] if jj + 1 < n else last + D
+                if s0 >= b:
+                    break
+                ov = min(b, s1) - max(a, s0)
+                if ov > 0:
+                    acc += ov * disp_b[jj]
+                    span += ov
+                jj += 1
+            fracs.append(acc / span if span > 0 else 0.0)
+        mid = [i for i, f in enumerate(fracs) if 0.20 < f < 0.80]
+        ctrl = [i for i, f in enumerate(fracs) if f < 0.10 or f > 0.90]
+        if len(mid) < 20 or len(ctrl) < 20:
+            print("  tag 0x%02x: %d straddling and %d control frames - not enough to read"
+                  " the shutter" % (tag, len(mid), len(ctrl)))
+            continue
+
+        def collect(idxs):
+            out = []
+            for i in idxs:
+                res = [v[i]["profile"][rr] - bg[rr] for rr in range(h)]
+                amp = sum(abs(x) for x in res) / h
+                if amp < 2.0:
+                    continue
+                out.append(res)
+            return out
+
+        def consistency(shapes):
+            if len(shapes) < 10:
+                return None
+            mean_shape = [sum(s[rr] for s in shapes) / len(shapes) for rr in range(h)]
+            mn = (sum(x * x for x in mean_shape)) ** 0.5
+            vals = []
+            for res in shapes:
+                rn = (sum(x * x for x in res)) ** 0.5
+                if rn <= 0 or mn <= 0:
+                    continue
+                vals.append(sum(res[rr] * mean_shape[rr] for rr in range(h)) / (rn * mn))
+            return statistics.median(vals) if vals else None
+
+        shapes = collect(mid)
+        ctrl_shapes = collect(ctrl)
+        if len(shapes) < 20 or len(ctrl_shapes) < 20:
+            print("  tag 0x%02x: only %d straddling and %d control frames carry measurable"
+                  " signal" % (tag, len(shapes), len(ctrl_shapes)))
+            continue
+        cons = consistency(shapes)
+        cons_ctrl = consistency(ctrl_shapes)
+        amp = statistics.median([sum(abs(x) for x in s) / h for s in shapes])
+        print("  tag 0x%02x: %d straddling frames with signal, median residual amplitude"
+              " %.0f counts" % (tag, len(shapes), amp))
+        print("      shape consistency, straddling frames : %.3f" % cons)
+        print("      shape consistency, control frames    : %.3f  (1.00 = the same spatial"
+              " pattern every frame)" % cons_ctrl)
+        if cons is None or cons_ctrl is None:
+            print("      -> INCONCLUSIVE: not enough signal in one of the two groups.")
+        elif cons_ctrl - cons > 0.30:
+            print("      -> ROLLING: frames with a transition inside their exposure change"
+                  " shape while frames without one do not. Rows expose at different times.")
+        elif cons > 0.80 and cons_ctrl > 0.80:
+            print("      -> GLOBAL: even the straddling frames keep one fixed shape, scaled"
+                  " frame to frame. One exposure window for the whole frame.")
+        elif cons_ctrl < 0.70:
+            print("      -> INCONCLUSIVE: the control frames are not consistent either"
+                  " (%.2f), so the scene itself is unstable enough to swamp the signature."
+                  " Dim the room and raise the target's contrast before quoting a shutter"
+                  " model." % cons_ctrl)
+        else:
+            print("      -> INCONCLUSIVE: neither signature is clean. Do not quote a shutter"
+                  " model from this capture.")
 
 
 def bar_analysis(by_tag, h, verbose=False):
@@ -410,6 +564,9 @@ def main():
     disp_b = [bits[fi - 1] if 1 <= fi <= len(bits) else 0 for fi, _, _ in tl]
 
     D = (disp_t[-1] - disp_t[0]) / (len(disp_t) - 1)
+    jit = [disp_t[i + 1] - disp_t[i] for i in range(len(disp_t) - 1)]
+    print("  display intervals: mean %.6f s, min %.6f, max %.6f, sd %.6f"
+          % (D, min(jit), max(jit), statistics.stdev(jit)))
     if not exact:
         print("  WARNING: the page did not report its wall-clock epoch, so the display")
         print("  timeline is anchored to POST receipt times, up to ~1 s late. The")
@@ -483,6 +640,8 @@ def main():
         print("\n  This difference is common-mode safe: the monitor clock, this machine's")
         print("  clock and the device clock all shift both cameras identically.")
         print("  The absolute phases above are NOT - they depend on those offsets.")
+
+        shutter_test(by_tag, fitted, disp_t, disp_b, T, h, window)
     else:
         print("\nRESULT: need both cameras fitted to get an offset.")
     return 0
