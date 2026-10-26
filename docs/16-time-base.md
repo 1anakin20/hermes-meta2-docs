@@ -340,8 +340,24 @@ mechanism for the hysteresis in `docs/10-enable-masks.md`, not just a measuremen
    3,927,221 ticks/frame at 183 MHz predicts 46.7 fps for RGB and mono - inside the measured
    28-52 fps band, which is corroboration, not proof.
 2. Whether the clock is production-coupled in a *healthy* session (§16.6 was measured starved).
-3. Per-tag behaviour on EP `0x81`: the trailer sits once per 256 B record, so the per-tag question
-   may already be answered - measure per tag from the trailer, not from `+20`.
+3. ~~Per-tag behaviour on EP `0x81`~~ - answered, see §16.12.
+
+## 16.12 Per-tag cadence from the trailer: one time domain, not five
+
+`meta2_mux_dump` now reports the median consecutive trailer-timestamp delta per tag.
+
+| capture | records | IMU0 (119) median | IMU1 (102) median | negatives |
+|---|---|---|---|---|
+| `probe2_ep81.bin` (starved) | 649 | 296,205 | 290,949 | 0 / 0 |
+| `probe8_ep81.bin` (starved) | 650 | 296,183 | 290,952 | 0 / 0 |
+| `cap_warm_ep81.bin` (healthy) | 5,568 | **618,565** | **618,542** | 0 / 0 |
+
+IMU0 and IMU1 cadences agree to **0.004%** in the healthy capture and to 1.8% in the starved ones,
+and **no tag produced a single negative delta**. So EP `0x81` has one timestamp domain shared by its
+tags, not one per tag - the earlier `[OPEN]` guess is closed.
+
+The cadence itself is mode-dependent (296k starved vs 619k healthy ticks per record), which is the
+same production-coupling §16.11 measured: fewer records per second, more ticks per record.
 
 What this changes in the shipping plan: **RGB, mono and IMU can be put on one device axis**, because
 all three carry the same trailer timestamp in the same unit. The axis is not yet calibrated to
