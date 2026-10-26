@@ -81,6 +81,12 @@ Model types are named in the `type` attribute:
   (`d = θ(1 + k1θ² + k2θ⁴ + k3θ⁶ + k4θ⁸)`). Both mono cameras use this.
 - `calibu_fu_fv_u0_v0_k1_k2_k3` — ordinary radial. `depth` and `rgb` use this.
 
+The `type` string names a parameter layout, not a formula, and `k1_k2_k3` is ambiguous
+between radial-in-radius and radial-in-angle. **That ambiguity is resolved in docs/19 §19.3**:
+`meta_calibu.dll`'s own disassembly gives `rd = r(1 + k1r² + k2r⁴ + k3r⁶)` with `r` from
+`x/z, y/z` and no tangential term, and reprojecting matched features on a real capture
+gives 13.4 px under that reading against 103 px under the other.
+
 The declared index order is:
 
 ```

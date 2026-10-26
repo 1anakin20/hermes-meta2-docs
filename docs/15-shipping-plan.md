@@ -158,7 +158,7 @@ saved data cannot separate these.
 |---|---|---|---|---|
 | 1 | **Device clock semantics** (§2) | `[UNKNOWN]`, and the documented constant is wrong | Live capture: readers pending on `0x81`+`0x82`+`0x83`, log host wall clock per URB *and* the device timestamp per record, 30 s, repeat 3× with different masks. Gives ticks/s directly and shows whether it is load-dependent | 1 session, device required |
 | 2 | **Mono A/B simultaneity** | `[UNKNOWN]`. A and B correlate with EP `0x83` (0.472 / 0.252 vs 0.04–0.07 shuffled) but weakly with each other — consistent with time-interleaved acquisition | Capture `0x82` with a known scene and read the per-fragment trailer timestamps; if A and B carry distinct, alternating timestamps they are not simultaneous | 1 capture, no operator |
-| 3 | **Mono / RGB intrinsics and camera-to-IMU extrinsics** | `[UNKNOWN]`. ToF intrinsics are extracted; mono/RGB are in the SDK's `g_pmd_cad` region and have never been extracted cleanly | Parse the calibration region for the mono/RGB blocks; failing that, a planar-calibration run (checkerboard at 12 positions) against captured frames | parse + 1 coached session |
+| 3 | **Mono / RGB intrinsics and camera-to-IMU extrinsics** | **Split 2026-10-26.** Intrinsics and camera-to-camera extrinsics: `[EXTRACTED]` — they were never hidden in a binary region, they are in the plain-text rig both copies of `calibration.bin` already carry (docs/19). Camera-to-IMU extrinsics: `[NOT IN THE FILE]` — all four vendor IMU poses are the identity, so the measured `docs/18` map is the only usable transform | Done for intrinsics (`meta2lib` `calibration.h/.c`, `tests/test_calibration`). Extrinsics need an optical run: checkerboard seen by the cameras while the IMU is coached | 1 coached session |
 | 4 | **Gyro scale factor** | `[MEASURED]` | Done 2026-10-25 by coached 360° turns: 0.0613 deg/s per count, ±2000 deg/s range, plus the tick rate 117,821,900 Hz and the IMU0↔IMU1 axis map - docs/17 | done |
 | 4b | **IMU axes in the headset frame** | `[MEASURED]` | Done 2026-10-25 by six gravity poses: `ay` vertical on both chips (IMU0 `+Z`, IMU1 `-Z`), `ax`/`az` ~45° in the X-Y plane, cross-checked against the gyro map to 10-18° - docs/18. `[OPEN]` the ~18° cant of `az` out of that plane: real mount cant or resting-geometry artifact, unresolved | done, one sub-item open |
 | 5 | **U vs V in the YUV422 stream** | `[UNKNOWN]`, coin flip | Capture against a saturated primary (a red and a blue target) and compare mean R−B under each packing | 1 coached session |
@@ -231,9 +231,12 @@ mono/RGB calibration run for #3. Coaches live in `tools/` (`gyro_coach.py`, `axi
   device have an accuracy floor of 6–11 deg, which is the same size as the anomaly being
   tested, so that route is closed rather than retried. The cant now needs the camera optical
   axis, which is offline work in docs/08.
-- The calibration run for #3 no longer needs coaching at all: a healthy all-four session
-  delivered RGB complete at 30.0000 fps over two 25 s windows with contiguous frame counters
-  and zero host drops.
+- The calibration run for #3 no longer needs coaching at all, and turned out not to need a
+  run either: the mono/RGB intrinsics and the camera-to-camera extrinsics were read straight
+  out of the vendor rig (docs/19). A healthy all-four session delivered RGB complete at
+  30.0000 fps over two 25 s windows with contiguous frame counters and zero host drops.
+- What #3 still needs from a coached session is one thing only: camera-to-IMU extrinsics,
+  which the vendor file does not contain.
 
 **Phase 4 — decide the product shape.** Re-opened 2026-10-26, because the answer Phase 1 appeared
 to give was wrong in the direction that matters. A/B do carry the same device timestamp, and RGB
@@ -241,6 +244,8 @@ does have one, on the same clock as the IMU stream. So the product statement is 
 one written on 2026-10-25: mono pair, RGB and dual IMU all timestamped in one device clock at
 117,821,900 ticks/s, that clock being device uptime rather than wall time and production-coupled
 (it stops when the device stops producing, docs/16 §16.11). What is still missing for a real VIO
-input set is calibration, not protocol: camera intrinsics and camera-to-IMU extrinsics (docs/08),
-and the mono A/B simultaneity contradiction (identical trailer timestamps vs weak image
-correlation) is unresolved. Say that in the README instead.
+input set is calibration, not protocol — and the calibration half has moved: camera intrinsics
+and camera-to-camera extrinsics are extracted and validated (docs/19), camera-to-IMU extrinsics
+are not in the vendor file at all and remain a measured map with a 6–10 deg floor (docs/18).
+The mono A/B simultaneity contradiction (identical trailer timestamps vs weak image
+correlation) is still unresolved. Say that in the README instead.
