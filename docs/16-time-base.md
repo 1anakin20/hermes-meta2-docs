@@ -217,8 +217,11 @@ The two cameras carry **the same timestamp** and have **separate PacketNum count
 "constant 64-fragment skew" of §16.2 was a property of the u32 per-fragment field, not of the
 cameras. No correction is needed between the mono pair; they are frame-locked.
 
-Mono per-camera cadence is 2 x 1,963,229 = 3,926,458 ticks, which matches RGB's 3,927,221 to
-0.02%. **RGB and mono are on the same frame cadence.**
+CORRECTION to the cadence arithmetic here: mono advances **1,963,229 ticks per frame slot**, not
+2 x 1,963,229. The two cameras share one timestamp, so the pair is one slot, not two. RGB's
+3,927,221 is therefore **exactly 2.0003x mono's** cadence: mono runs at twice the RGB frame rate in
+device time. Measured in a healthy session: mono 87.75 records/s per camera against RGB 39.7
+records/s - ratio 2.21, consistent with the 2.0003 cadence ratio plus ramp-up.
 
 ## 16.5 The mux timestamp is neither clock nor counter
 
@@ -308,17 +311,26 @@ mechanism for the hysteresis in `docs/10-enable-masks.md`, not just a measuremen
 `[MEASURED]`
 - Every endpoint carries the same 32-byte trailer with a 64-bit timestamp (§16.4.1).
 - RGB cadence is 3,927,221 ticks/frame in five independent captures, starved and healthy alike.
-- Mono per-camera cadence is 3,926,458 ticks - the same unit as RGB to 0.02%.
+- Mono per-camera cadence is 1,963,229 ticks per frame slot; RGB's 3,927,221 is 2.0003x that.
+  One tick unit, mono at twice the RGB frame rate.
 - The two mono cameras share one timestamp and have separate PacketNum counters.
 - Within one endpoint the trailer timestamp is monotonic (0 negative deltas in 366, 370 and 648
   consecutive pairs on EP `0x81`).
 - On EP `0x81` the trailer timestamp and the mux `+20` field agree to within 1% of span
   (55,232,971 vs 55,121,250 ticks in one session) - they are the same clock read at two places.
 
+`[MEASURED]` - the strongest coherence number so far
+- In a healthy session (queue 8, `warm=7e fast`, health=OK) EP `0x82` and EP `0x83` trailer spans
+  were 1,005,378,820 and 1,005,367,816 ticks - **the same elapsed device time to 0.001%**. Mono and
+  RGB advanced by the same amount over the same window.
+- In a healthy session at queue 1 the EP `0x81` trailer is perfectly monotonic: **0 negative deltas
+  in 4,237 consecutive pairs**, span 1,969,824,762 ticks over a 12.0 s window = 162.55 MHz, and the
+  mux `+20` field's span for the same session was 1,969,732,039 - agreement to 0.005%.
+
 `[INFERRED]`
-- The endpoints share a unit and an epoch but run independent timelines: in one session EP `0x82`/
-  `0x83` started 1.48e9 ticks above EP `0x81`, and RGB produced 2.12e9 ticks while mux produced
-  5.6e7 in the same 12 s window. A single global counter would not do that.
+- The endpoints share a unit and an epoch but their offsets differ: in one session EP `0x82`/`0x83`
+  started 1.48e9 ticks above EP `0x81`. Offsets are stable within a session; they are not one
+  counter read at the same instant.
 - The tick rate is ~183 MHz when the device is healthy: the gate's coverage metric is
   `ts span / window` and healthy sessions measure 0.9944-0.9989, i.e. the mux timestamps span the
   wall window. Starved sessions measure 0.025 - the same clock delivering 0.3 s of ticks per 12 s.
@@ -345,4 +357,36 @@ in a gated run: the spans come out as 0 with negative deltas of -1.6e9 and absur
 2^63. Two causes, both known: the queued reader delivers URBs out of order (RGB blocks arrive
 hundreds of records out of sequence), and a gated run concatenates several attempts into one ring.
 `meta2_trailer_dump` on a single-attempt saved capture does not show this - there every gap is `+1`
-with zero negatives. Do not read a gated run's EP `0x82`/`0x83` span as a clock.
+with zero negatives. Do not read a gated run's EP `0x82`/`0x83` span as a clock. **Queue 1 fixes
+EP `0x81`** (0 negatives in 4,237 pairs) but not EP `0x82`.
+
+## 16.9 The timestamp is device uptime, not wall time
+
+Unplugging and replugging the headset resets the epoch to near zero:
+
+| state | EP `0x81` first trailer timestamp |
+|---|---|
+| before replug, stall session 1 | 1,600,591,472,805 |
+| before replug, stall session 2 | 1,611,388,894,162 |
+| after replug, control | 24,111,496,921 |
+| after replug, test | 40,913,286,216 |
+| saved `ir29_ep83.bin` (device recently booted) | 17,404,866,702 |
+| saved `probe2_ep83.bin` (device long-running) | 3,484,086,693,215 |
+
+So the 64-bit field counts from the device's own power-on, and its magnitude tracks how long the
+device has been active. `[MEASURED]` the reset. `[INFERRED]` it counts active time rather than
+elapsed time, which is the same conclusion §16.6 reached from the other direction.
+
+## 16.10 How to get a healthy session back from a cold replug
+
+After a replug the device was starved for 10 consecutive attempts at 3.6-4.7 MHz. Adding
+`warm=7e fast` to the same binary and arm recovered health on both queue settings:
+
+| config | final attempt | health | coverage | clock | records | mono fps/cam | RGB fps |
+|---|---|---|---|---|---|---|---|
+| queue 1, `warm=7e fast` | 4/4 | **OK** | 1.1118 | 203.46 MHz | 4,238 (350/s) | 23.2 (4.7% complete) | 28.4 |
+| queue 8, `warm=7e fast` | 4/4 | **OK** | 1.0744 | 196.62 MHz | 4,056 (338/s) | 54.9 (62.5% complete) | 27.3 |
+
+Queue depth is **not** the discriminator - both reached OK. The warm-up mask plus fast sustain is.
+Queue 1 is the right choice for timestamp work (in-order ring, monotonic EP `0x81`); queue 8 is the
+right choice for mono completeness.
