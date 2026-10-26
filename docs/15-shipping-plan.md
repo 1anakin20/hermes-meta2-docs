@@ -90,7 +90,9 @@ Both valid flags are 1 in every record of every capture. At rest:
 
 `[MEASURED]` gravity magnitude ≈ 16,700 counts/g, and IMU0 / IMU1 have mirrored accel axes
 (IMU0 `ay` +15,958, IMU1 `ay` −15,943) — two IMUs mounted in opposite senses. Gyro noise floor
-≈ 2 counts at rest. `[UNKNOWN]` gyro scale: no counts→rad/s factor has ever been measured.
+≈ 2 counts at rest. `[MEASURED]` gyro scale 0.0613 deg/s per count (16.32 counts per deg/s),
+±2000 deg/s full scale, from a coached 360° session - docs/17 §17.3. Accel ≈ 16,384 counts/g at
+±2 g `[INFERRED, moderate]` - docs/17 §17.5.
 
 **Correction to `docs/14-project-state.md` §2:** "~57 records/s" is one configuration, not the
 device's rate. Measured across captures with the same tag mix: 80.6 records/s (`e3a`, 8.0 s),
@@ -155,7 +157,7 @@ saved data cannot separate these.
 | 1 | **Device clock semantics** (§2) | `[UNKNOWN]`, and the documented constant is wrong | Live capture: readers pending on `0x81`+`0x82`+`0x83`, log host wall clock per URB *and* the device timestamp per record, 30 s, repeat 3× with different masks. Gives ticks/s directly and shows whether it is load-dependent | 1 session, device required |
 | 2 | **Mono A/B simultaneity** | `[UNKNOWN]`. A and B correlate with EP `0x83` (0.472 / 0.252 vs 0.04–0.07 shuffled) but weakly with each other — consistent with time-interleaved acquisition | Capture `0x82` with a known scene and read the per-fragment trailer timestamps; if A and B carry distinct, alternating timestamps they are not simultaneous | 1 capture, no operator |
 | 3 | **Mono / RGB intrinsics and camera-to-IMU extrinsics** | `[UNKNOWN]`. ToF intrinsics are extracted; mono/RGB are in the SDK's `g_pmd_cad` region and have never been extracted cleanly | Parse the calibration region for the mono/RGB blocks; failing that, a planar-calibration run (checkerboard at 12 positions) against captured frames | parse + 1 coached session |
-| 4 | **Gyro scale factor** | `[UNKNOWN]` | Rotate the headset at a measured rate (a turntable at a measured RPM, or a 360° hand-timed rotation) and read the gyro counts | 1 coached session |
+| 4 | **Gyro scale factor** | `[MEASURED]` | Done 2026-10-25 by coached 360° turns: 0.0613 deg/s per count, ±2000 deg/s range, plus the tick rate 117,821,900 Hz and the IMU0↔IMU1 axis map - docs/17 | done |
 | 5 | **U vs V in the YUV422 stream** | `[UNKNOWN]`, coin flip | Capture against a saturated primary (a red and a blue target) and compare mean R−B under each packing | 1 coached session |
 | 6 | **Mono frame tearing, 20% of frames** | `[MEASURED]` 71–76% of gaps exact, 79–84% of volume usable | Determine whether the partial gaps are host-side URB scheduling or device-side: correlate `partial_gaps` against `timeouts` and concurrent-reader count | offline, from saved captures |
 | 7 | **IMU sample rate** | `[UNKNOWN]` — mux record rate varies 80–448/s with configuration, so the IMU rate is not established | Same live capture as #1 | folded into #1 |

@@ -440,6 +440,20 @@ median-delta x record-rate estimate. The estimators bracket **162-205 MHz**; the
 the only one anchored to a known host-side duration, so it is the one to quote, with the bracket
 named.
 
+**SUPERSEDED 2026-10-25 by docs/17 §17.4: the tick rate is 117,821,900 Hz.** The bracket above is
+withdrawn. A 400 s coached session gave 1.178219e8 and 1.178218e8 ticks/host-second from the two IMU
+streams independently (agreeing to 0.0001%, monotonic throughout, and stable to 0.05% across all 18
+sub-windows), and that value makes the independently measured camera cadences come out at exact
+integers - 3,927,221 ticks/frame becomes 30.0013 fps for RGB and 1,963,229 becomes 60.0143 fps for
+mono - which are the delivered rates measured in docs/10 §10.9. At 167 MHz RGB would be 42.5 fps and
+mono 85 fps; at 183 MHz, 21.5 and 93.2. No capture has delivered either.
+
+Why the short-window estimates over-read: they used the **median** consecutive timestamp delta times
+the record rate. Timestamp deltas in a healthy stream are bursty - in the calibration session the
+median per-record delta was 309k ticks while the mean was 494k, because the stream contains gaps up to
+22.9M ticks. A median-based estimator over-reads by roughly the burst factor. Use span/window, not
+median x rate, whenever a tick rate is wanted.
+
 Consequence for the library: a host-side stall is invisible in the device time base. A VIO pipeline
 cannot use the trailer timestamp to measure a gap it caused itself - it has to notice the gap on the
 host side and either drop the interval or timestamp it with host time. And the device must be kept
