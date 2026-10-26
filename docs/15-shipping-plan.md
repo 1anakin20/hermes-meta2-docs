@@ -40,8 +40,8 @@ u32 at record+20 advances +1 per frame. `meta2_find_frames` implements it; `burs
 `frames=74 monotonic=1`.
 
 `[VERIFIED]` pixel phase: luma at odd phases, chroma at even (phase correlations 0.994 / −0.675).
-`[UNKNOWN]` which chroma phase is U and which is V — every capture so far is near-neutral, so no
-statistic distinguishes them.
+`[MEASURED 2026-10-26]` chroma order is **UYVY**: phase 0 is Cb, phase 2 is Cr, settled against
+full-screen red then blue inside one session (docs/05 §5.3.1) and pinned by `tests/test_decode.c`.
 
 ### EP 0x82 — mono pair, 2 × 752×480 10-bit
 
@@ -71,6 +71,18 @@ Derived, and this is the number that matters:
 at +28 advancing +1 per fragment per camera, 2,032 u16 samples at +32, 16-byte trailer. Full frame
 = 721,920 B samples + 32 B trailer. `meta2_mono_feed` assembles exact frames; `meta2_mono_to_gray`
 maps 10→8 bit (black level 42, max 1023).
+
+**Geometry, from the vendor rig (docs/19 §19.5.1).** Each mono camera is a **182° × 120° fisheye**:
+half-angle 91.2° at the horizontal frame edge, 59.8° / 59.5° vertically. The axes are **83.30° apart**,
+canted **41.65° outward** each side of straight ahead, on a **0.13799 m** baseline. The fields of view
+therefore overlap over **±49.6° around straight ahead** — a point dead ahead lands at `u ≈ 204` in
+`mono_right` and `u ≈ 551` in `mono_left`, well inside both frames.
+
+**What that pair is for.** A wide baseline, outward-canted, ultra-wide fisheye pair is the standard
+mounting for **visual tracking over a room**: the splay covers a large workspace and 13.8 cm gives strong
+parallax at distance. It is a poor near-field stereo depth rig — close content has enormous parallax and
+does not correspond between the frames. Ship the tracking capability; do not promise metric depth at
+arm's length.
 
 ### EP 0x81 — mux: IMU0, IMU1, microphones, `0xAA`
 
@@ -109,7 +121,12 @@ repeats**. `meta2_mux_counters_monotonic()` returns 0 on real captures because o
 
 ## 2. The blocker: there is no usable timestamp
 
-This is the single thing that decides whether the library ships as a *capture* library or as a
+> **SUPERSEDED 2026-10-26 — read docs/16 and docs/17 §17.4 instead.** The timestamp was found: a
+> 32-byte trailer block on every endpoint, one shared time base, calibrated at 117,821,900 Hz, device
+> uptime and production-coupled. What follows is the history of why the search was hard, not an open
+> item.
+
+This was the single thing that decides whether the library ships as a *capture* library or as a
 *tracking front end*.
 
 `[MEASURED]` across the 33 saved EP `0x81` captures, the u64 at +20 advances monotonically with the
@@ -156,12 +173,12 @@ saved data cannot separate these.
 
 | # | Item | State | Experiment that closes it | Cost |
 |---|---|---|---|---|
-| 1 | **Device clock semantics** (§2) | `[UNKNOWN]`, and the documented constant is wrong | Live capture: readers pending on `0x81`+`0x82`+`0x83`, log host wall clock per URB *and* the device timestamp per record, 30 s, repeat 3× with different masks. Gives ticks/s directly and shows whether it is load-dependent | 1 session, device required |
-| 2 | **Mono A/B simultaneity** | `[UNKNOWN]`. A and B correlate with EP `0x83` (0.472 / 0.252 vs 0.04–0.07 shuffled) but weakly with each other — consistent with time-interleaved acquisition | Capture `0x82` with a known scene and read the per-fragment trailer timestamps; if A and B carry distinct, alternating timestamps they are not simultaneous | 1 capture, no operator |
+| 1 | **Device clock semantics** (§2) | **DONE 2026-10-26.** `[MEASURED]` a 32-byte trailer timestamp on every endpoint, one shared time base, device uptime rather than wall time, production-coupled, calibrated at **117,821,900 Hz** (`META2_TICKS_PER_S`) — docs/16, docs/17 §17.4 | — | done |
+| 2 | **Mono pair: exposure-locked, and what it is for** | **Rescoped 2026-10-26.** The old framing ("identical trailer timestamps vs weak image correlation") was a contradiction between a direct read and a test that never measured timing. `[MEASURED]` from the rig (docs/19 §19.5.1): each mono is a **182° × 120° fisheye**, axes 83.30° apart on a 0.13799 m baseline, so the pair shares a **±49.6° wedge around straight ahead** — weak correlation there is expected (worst distortion, largest viewpoint angle, biggest parallax) and says nothing about simultaneity. Frame-lock itself is `[MEASURED]`: identical trailer timestamps, two independent `PacketNum` counters advancing together. NOT established: whether a shared stamp is the same **exposure instant** or only the same **record framing** | Time-varying target inside the overlap wedge — a rolling display scan line, a PWM-driven LED, or a fast-moving object. If both mono frames capture the same phase of a fast periodic signal, the pair is exposure-locked. No feature matching involved | 1 capture, no operator |
 | 3 | **Mono / RGB intrinsics and camera-to-IMU extrinsics** | **Split 2026-10-26.** Intrinsics and camera-to-camera extrinsics: `[EXTRACTED]` — they were never hidden in a binary region, they are in the plain-text rig both copies of `calibration.bin` already carry (docs/19). Camera-to-IMU extrinsics: `[NOT IN THE FILE]` — all four vendor IMU poses are the identity, so the measured `docs/18` map is the only usable transform | Done for intrinsics (`meta2lib` `calibration.h/.c`, `tests/test_calibration`). Extrinsics need an optical run: checkerboard seen by the cameras while the IMU is coached | 1 coached session |
 | 4 | **Gyro scale factor** | `[MEASURED]` | Done 2026-10-25 by coached 360° turns: 0.0613 deg/s per count, ±2000 deg/s range, plus the tick rate 117,821,900 Hz and the IMU0↔IMU1 axis map - docs/17 | done |
 | 4b | **IMU axes in the headset frame** | `[MEASURED]` | Done 2026-10-25 by six gravity poses: `ay` vertical on both chips (IMU0 `+Z`, IMU1 `-Z`), `ax`/`az` ~45° in the X-Y plane, cross-checked against the gyro map to 10-18° - docs/18. `[OPEN]` the ~18° cant of `az` out of that plane: real mount cant or resting-geometry artifact, unresolved | done, one sub-item open |
-| 5 | **U vs V in the YUV422 stream** | `[UNKNOWN]`, coin flip | Capture against a saturated primary (a red and a blue target) and compare mean R−B under each packing | 1 coached session |
+| 5 | **U vs V in the YUV422 stream** | **DONE 2026-10-26.** `[MEASURED]` UYVY — phase 0 is Cb, phase 2 is Cr, settled against full-screen red then blue inside one session (docs/05 §5.3.1), pinned by `tests/test_decode.c` | — | done |
 | 6 | **Mono frame tearing, 20% of frames** | `[MEASURED]` 71–76% of gaps exact, 79–84% of volume usable | Determine whether the partial gaps are host-side URB scheduling or device-side: correlate `partial_gaps` against `timeouts` and concurrent-reader count | offline, from saved captures |
 | 7 | **IMU sample rate** | `[UNKNOWN]` — mux record rate varies 80–448/s with configuration, so the IMU rate is not established | Same live capture as #1 | folded into #1 |
 | 8 | **Buttons (`0x99`) never observed on the wire** | `[UNKNOWN]` | Press and hold each button while capturing `0x81` with mux bit 3 enabled | 1 coached session |
@@ -247,5 +264,7 @@ one written on 2026-10-25: mono pair, RGB and dual IMU all timestamped in one de
 input set is calibration, not protocol — and the calibration half has moved: camera intrinsics
 and camera-to-camera extrinsics are extracted and validated (docs/19), camera-to-IMU extrinsics
 are not in the vendor file at all and remain a measured map with a 6–10 deg floor (docs/18).
-The mono A/B simultaneity contradiction (identical trailer timestamps vs weak image
-correlation) is still unresolved. Say that in the README instead.
+The mono pair is a **tracking** pair, not a depth pair: 182° × 120° fisheyes, 83.30° apart on a 13.8 cm
+baseline, overlapping over ±49.6° around straight ahead (docs/19 §19.5.1). Frame-lock is measured from
+the trailer; whether the shared stamp is an exposure instant or only a framing stamp is still open
+(item 2). Say that in the README instead.

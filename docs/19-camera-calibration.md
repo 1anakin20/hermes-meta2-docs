@@ -134,6 +134,33 @@ Derived, from the table above:
 - **`rgb` looks straight ahead**, 0.68° from the world frame, and sits 2.7 cm to
   the wearer's left of the depth camera.
 
+### 19.5.1 Field of view, and what the mono pair is actually good for
+
+Computed from the coefficients in §19.4 and the poses above:
+
+| | |
+|---|---|
+| mono horizontal half-FOV | **91.2°** on both (total 182°) |
+| mono vertical half-FOV | 59.8° (`mono_right`), 59.5° (`mono_left`) — total ≈ 120° |
+| mono axis cant | 41.65° outward each side of straight ahead |
+| **overlap wedge** | **±49.6° around straight ahead** |
+| a point dead ahead lands at | `u ≈ 204` in `mono_right`, `u ≈ 551` in `mono_left` |
+
+The mono pair is a **wide-baseline, outward-canted, ultra-wide fisheye** configuration. That is the
+standard mounting for visual tracking over a room: the splay covers a large workspace and 13.8 cm gives
+strong parallax at distance. It is a poor near-field stereo rig — close content has enormous parallax and
+does not correspond between the two frames. The library should promise tracking, not metric depth at
+arm's length.
+
+**This retires a claimed contradiction.** An earlier note treated the pair as suspicious because the two
+cameras "correlate weakly with each other" while the trailer shows identical timestamps. Weak correlation
+is exactly what this geometry predicts: the overlap region is where fisheye distortion is worst, where the
+angle between the two viewpoints is largest, and where a 13.8 cm baseline produces the most parallax.
+Correlation strength measures **matching difficulty**, not timing, so it was never evidence against
+frame-lock. What the trailer does establish — identical timestamps with two independent `PacketNum`
+counters advancing together — stands on its own. What remains open is narrower, and is item 2 of docs/15:
+whether a shared stamp is the same **exposure instant** or only the same **record framing**.
+
 Sanity check in the test: a world point 5 m straight ahead projects to
 `mono_left (550.8, 283.8)` and `mono_right (204.5, 288.0)` — symmetric about each
 image's principal point, as a symmetric pair should be.
