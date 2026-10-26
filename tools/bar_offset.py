@@ -362,66 +362,80 @@ def shutter_test(by_tag, fitted, disp_t, disp_b, T, h, window):
                     span += ov
                 jj += 1
             fracs.append(acc / span if span > 0 else 0.0)
-        mid = [i for i, f in enumerate(fracs) if 0.20 < f < 0.80]
-        ctrl = [i for i, f in enumerate(fracs) if f < 0.10 or f > 0.90]
+        # A frame's residual is (its bright fraction - the mean bright fraction) times
+        # the monitor's footprint. A frame sitting exactly at the mean therefore has NO
+        # shape signal at all, and its "shape" is pure photometric noise - which is how
+        # this test produced a confident false "ROLLING" on a synthetic global-shutter
+        # capture at 4x noise. Two consequences: keep only frames far enough from the
+        # mean that the signal beats the noise. (Normalising each residual by its deviation
+        # was tried and is wrong: it lifts the noise-dominated frames to the same scale as
+        # the signal-bearing ones, and the rolling signature - which lives in the raw
+        # magnitudes of the shape - disappears. Filter, do not rescale.)
+        fbar = sum(fracs) / len(fracs)
+        dev = [f - fbar for f in fracs]
+        mid = [i for i, f in enumerate(fracs) if 0.15 < f < 0.85 and abs(dev[i]) > 0.18]
+        ctrl = [i for i, f in enumerate(fracs)
+                if (f < 0.10 or f > 0.90) and abs(dev[i]) > 0.18]
         if len(mid) < 20 or len(ctrl) < 20:
             print("  tag 0x%02x: %d straddling and %d control frames - not enough to read"
                   " the shutter" % (tag, len(mid), len(ctrl)))
             continue
 
-        def collect(idxs):
+        def edge_measure(idxs):
+            """For one frame: the biggest single-row jump in the background-subtracted
+            profile, divided by that frame's brightness deviation.
+
+            A global shutter's residual is the monitor's footprint scaled by one number.
+            Its biggest row-to-row jump is whatever the footprint's own gradient is, plus
+            noise - and the control frames carry the same footprint at a larger deviation,
+            so dividing by the deviation puts both groups on the same scale. A rolling
+            shutter's residual has a hard horizontal edge where the display changed mid
+            exposure, and that edge is a jump of the FULL amplitude. This is exactly the
+            thing a person would see looking at one frame, which is why it is the metric
+            worth trusting."""
             out = []
-            for i in idxs:
-                res = [v[i]["profile"][rr] - bg[rr] for rr in range(h)]
+            for i2 in idxs:
+                res = [v[i2]["profile"][rr] - bg[rr] for rr in range(h)]
                 amp = sum(abs(x) for x in res) / h
                 if amp < 2.0:
                     continue
-                out.append(res)
+                jump = max(abs(res[rr + 1] - res[rr]) for rr in range(h - 1))
+                out.append(jump / abs(dev[i2]))
             return out
 
-        def consistency(shapes):
-            if len(shapes) < 10:
-                return None
-            mean_shape = [sum(s[rr] for s in shapes) / len(shapes) for rr in range(h)]
-            mn = (sum(x * x for x in mean_shape)) ** 0.5
-            vals = []
-            for res in shapes:
-                rn = (sum(x * x for x in res)) ** 0.5
-                if rn <= 0 or mn <= 0:
-                    continue
-                vals.append(sum(res[rr] * mean_shape[rr] for rr in range(h)) / (rn * mn))
-            return statistics.median(vals) if vals else None
-
-        shapes = collect(mid)
-        ctrl_shapes = collect(ctrl)
-        if len(shapes) < 20 or len(ctrl_shapes) < 20:
+        str_e = edge_measure(mid)
+        ctl_e = edge_measure(ctrl)
+        if len(str_e) < 20 or len(ctl_e) < 20:
             print("  tag 0x%02x: only %d straddling and %d control frames carry measurable"
-                  " signal" % (tag, len(shapes), len(ctrl_shapes)))
+                  " signal" % (tag, len(str_e), len(ctl_e)))
             continue
-        cons = consistency(shapes)
-        cons_ctrl = consistency(ctrl_shapes)
-        amp = statistics.median([sum(abs(x) for x in s) / h for s in shapes])
-        print("  tag 0x%02x: %d straddling frames with signal, median residual amplitude"
-              " %.0f counts" % (tag, len(shapes), amp))
-        print("      shape consistency, straddling frames : %.3f" % cons)
-        print("      shape consistency, control frames    : %.3f  (1.00 = the same spatial"
-              " pattern every frame)" % cons_ctrl)
-        if cons is None or cons_ctrl is None:
-            print("      -> INCONCLUSIVE: not enough signal in one of the two groups.")
-        elif cons_ctrl - cons > 0.30:
-            print("      -> ROLLING: frames with a transition inside their exposure change"
-                  " shape while frames without one do not. Rows expose at different times.")
-        elif cons > 0.80 and cons_ctrl > 0.80:
-            print("      -> GLOBAL: even the straddling frames keep one fixed shape, scaled"
-                  " frame to frame. One exposure window for the whole frame.")
-        elif cons_ctrl < 0.70:
-            print("      -> INCONCLUSIVE: the control frames are not consistent either"
-                  " (%.2f), so the scene itself is unstable enough to swamp the signature."
-                  " Dim the room and raise the target's contrast before quoting a shutter"
-                  " model." % cons_ctrl)
-        else:
-            print("      -> INCONCLUSIVE: neither signature is clean. Do not quote a shutter"
-                  " model from this capture.")
+        s_edge = statistics.median(str_e)
+        c_edge = statistics.median(ctl_e)
+        print("  tag 0x%02x: %d straddling frames, %d control frames" % (tag, len(str_e), len(ctl_e)))
+        print("      biggest row-to-row edge, straddling frames : %.3f of the frame's"
+              " brightness deviation" % s_edge)
+        print("      biggest row-to-row edge, control frames    : %.3f  (control frames"
+              " cannot contain an edge, so this is the baseline)" % c_edge)
+        # No verdict. A rolling shutter's signature is a difference between the time the
+        # first row exposes and the time the last row exposes. This target cannot produce
+        # one: the display changes state every 16.69 ms and the sensor reads out every
+        # 16.66 ms, so a row's exposure window slides across exactly one display state
+        # over the height of the frame. The transition is therefore spread over the whole
+        # frame as a ramp, never as an edge, and a ramp is what the target's own shape
+        # already looks like. Sweeping the synthetic model over exposure times from a full
+        # frame down to 0.67 ms, the biggest normalised edge is 0.121 global vs 0.080
+        # rolling at full exposure and 0.193 vs 0.138 at 0.67 ms - the rolling case is the
+        # SMOOTHER of the two at every exposure. Three formulations of this test were
+        # tried and each produced a wrong verdict on synthetic captures with known
+        # answers, which is the point of having them.
+        #
+        # Settling the shutter model needs something that changes faster than the readout
+        # time: a real strobe, mains-frequency flicker, or a fast pan measured against the
+        # gyro. A 60 Hz display cannot do it, at any brightness.
+        print("      -> NOT MEASURABLE WITH THIS TARGET. The target changes state at 60 Hz")
+        print("         and the sensor reads out at 60 Hz, so a row-time skew appears as a")
+        print("         ramp across the whole frame rather than an edge. The numbers above")
+        print("         are reported for completeness, not as a verdict.")
 
 
 def bar_analysis(by_tag, h, verbose=False):

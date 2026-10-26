@@ -35,9 +35,10 @@ def sequence(seed, n):
     return out
 
 
-def bright_fraction(t0, bits, disp_t, D):
-    """Fraction of [t0, t0+T] that fell on a bright display interval."""
-    a, b = t0, t0 + T
+def bright_fraction(t0, bits, disp_t, D, exposure=None):
+    """Fraction of [t0, t0+exposure] that fell on a bright display interval.
+    exposure is in seconds; the default is one whole frame period."""
+    a, b = t0, t0 + (T if exposure is None else exposure)
     acc = span = 0.0
     j = max(0, int((a - disp_t[0]) // D) - 2)
     while j < len(disp_t):
@@ -76,7 +77,7 @@ def footprint(H):
 
 def make_run(dirpath, prefix, seed, dt, nframes=1200, page_fps=59.94,
              drain_lag=0.030, L0=45.0, L1=180.0, noise=1.5, wall_epoch=0.0,
-             drop=0.0, seed_rng=7, roll=0.0):
+             drop=0.0, seed_rng=7, roll=0.0, exposure=1.0):
     os.makedirs(dirpath, exist_ok=True)
     D = 1.0 / page_fps
     disp_t = [i * D for i in range(nframes)]
@@ -95,6 +96,10 @@ def make_run(dirpath, prefix, seed, dt, nframes=1200, page_fps=59.94,
     prof = open(os.path.join(dirpath, prefix + ".prof"), "wb")
     prof.write(b"M2BP")
     prof.write(struct.pack("<IIIII", 1, MONO_H, 64, 552, 202))
+
+    raw = None
+    if os.environ.get("SYNTH_RAW"):
+        raw = open(os.path.join(dirpath, prefix + ".raw"), "wb")
 
     csv = open(os.path.join(dirpath, prefix + ".csv"), "w")
     csv.write("# synthetic\n")
@@ -116,7 +121,7 @@ def make_run(dirpath, prefix, seed, dt, nframes=1200, page_fps=59.94,
         if drop and keep.random() < drop:
             continue
         for tag, t_exp in ((0x44, t_exp_left), (0x55, t_exp_right)):
-            f = bright_fraction(t_exp + k * T, bits, disp_t, D)
+            f = bright_fraction(t_exp + k * T, bits, disp_t, D, exposure * T)
             if f is None:
                 continue
             # roll is the readout time as a fraction of the frame period. roll=0 is a
@@ -128,7 +133,7 @@ def make_run(dirpath, prefix, seed, dt, nframes=1200, page_fps=59.94,
             for i in range(MONO_H):
                 if roll > 0.0:
                     fi = bright_fraction(t_exp + k * T + (i / MONO_H) * roll * T,
-                                         bits, disp_t, D)
+                                         bits, disp_t, D, exposure * T)
                     if fi is None:
                         fi = f
                 else:
@@ -140,10 +145,18 @@ def make_run(dirpath, prefix, seed, dt, nframes=1200, page_fps=59.94,
             ts = ts0 + k * int(MONO_TICKS)
             prof.write(rec.pack(host_us, ts, 1000 + k, tag, 1, level))
             prof.write(rows.pack(*rowvals))
+            if raw is not None:
+                # the recorder's `raw` writes the frame as META2_MONO_W x META2_MONO_H
+                # u16 samples, one block per csv row, in the same order
+                for i in range(MONO_H):
+                    v = int(max(0, min(65535, round(rowvals[i]))))
+                    raw.write(struct.pack('<%dH' % MONO_W, *([v] * MONO_W)))
             csv.write("%d,%d,%d,%d,1,%.4f,%d,%.1f,%d\n"
                     % (host_us, ts, 1000 + k, tag, level, 240, level, 1))
             truth[tag] = t_exp
     prof.close(); csv.close()
+    if raw is not None:
+        raw.close()
 
     # The page posts its frame buffer once a second, so the server receipt stamp is
     # up to one POST interval after the frame was displayed. The analysis has to
