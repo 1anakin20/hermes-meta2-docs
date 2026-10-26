@@ -360,6 +360,10 @@ hundreds of records out of sequence), and a gated run concatenates several attem
 with zero negatives. Do not read a gated run's EP `0x82`/`0x83` span as a clock. **Queue 1 fixes
 EP `0x81`** (0 negatives in 4,237 pairs) but not EP `0x82`.
 
+A `pause=N` run breaks EP `0x81` too: its trailer span came out 618,333 ticks while the mux `+20`
+span for the same run was 1,469,630,660. That is why §16.11 compares the **mux `+20` spans**, which
+are read from parsed records in stream order, not from the trailer scan.
+
 ## 16.9 The timestamp is device uptime, not wall time
 
 Unplugging and replugging the headset resets the epoch to near zero:
