@@ -146,14 +146,20 @@ IMU1.z = + IMU0.x
 
 Determinant +1 (a proper rotation, not a mirror). Relative residual 0.376; the
 next-best candidate of the 48 fits 0.975 and the worst 1.968, so the mapping is
-well separated from its alternatives but not tight - the coached turns were impure
-and each vector carries that error. The `y` sign is independently confirmed by the
-gravity anchor in §17.5, which is the strongest single line of evidence here.
+well separated from its alternatives but not tight.
 
-`[OPEN]` Which physical direction each axis is in the headset frame. This
-experiment gives the relationship between the two IMUs, not either one's alignment
-to the optics. That needs a coached step against a known reference (screen normal,
-or a level surface).
+Two caveats, both settled later by docs/18:
+
+- The 0.376 residual was not only impure turns. The fit was constrained to signed
+  permutations, and the chips turned out to be mounted ~45 degrees off the headset
+  frame, so no permutation is correct. The relative map is still the right
+  relationship between the two IMUs - docs/18 §18.4 confirms it to 10-18 degrees
+  from an independent gravity measurement - but it is an approximation of a
+  rotation, not the rotation.
+- Do not read this as an absolute map. It never was one.
+
+`[CLOSED by docs/18]` the alignment to the headset frame: `ay` is vertical on both
+chips (IMU0 `+Z`, IMU1 `-Z`), and `ax`/`az` sit at ~45 degrees in the X-Y plane.
 
 ---
 
