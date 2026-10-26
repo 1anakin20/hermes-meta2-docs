@@ -209,17 +209,38 @@ sessions whose fragment rates differed 23.5×), so it orders samples but does no
 real time; the mono A/B skew is a **constant 64 fragments**; **RGB carries no device timestamp
 at all** — every 4-byte slot of its 32-byte header is constant, zero, the frame counter, or
 unstructured. The 336.29 MHz mono "clock" quoted earlier is withdrawn as a drain-rate artifact.
-Remaining: per-tag mux clocks on EP `0x81`, and the mono tick→second scale.
+Two claims in that paragraph were later superseded by the same document, and are repeated here
+because they were load-bearing: **RGB does carry a device timestamp**, in the 32-byte trailer
+block 8 bytes before the `baabedfe` magic, not in the 32-byte header that was swept; and the
+"constant 64-fragment" A/B skew is a property of the per-fragment sample-domain field, not of
+the cameras — the frame-record trailers of A and B carry identical timestamps with separate
+packet counters. The tick→second scale is now measured, not open: 117,821,900 Hz (docs/17).
 
 **Phase 2 — offline, from saved captures.** Open items #2 and #6. `cap_cold_ep82.bin`,
 `screen_66_ep82.bin`, `ir29_ep82.bin` and `cap_four_ep82.bin` are already on disk; the mono trailer
 timestamps are already inside them. No headset needed.
 
-**Phase 3 — coached physical session.** Open items #4, #5, #8, and the mono/RGB calibration run for
-#3. Use `re/scene_coach.py` (`:8095`), which waits for the operator's start click.
+**Phase 3 — coached physical session, mostly DONE 2026-10-26.** Open items #4, #5, #8, and the
+mono/RGB calibration run for #3. Coaches live in `tools/` (`gyro_coach.py`, `axis_coach.py`,
+`face_coach.py`, `colour_coach.py`) and all wait for the operator's start click.
 
-**Phase 4 — decide the product shape.** Phase 1 answered this, partially and against us: A/B are
-**not** simultaneous (constant 64-fragment skew, calibratable) and RGB has **no** device clock.
-So the honest product statement is: mono pair + dual IMU alignable in the mono sample domain with
-a fixed correction; RGB ordered by frame counter only, loosely clocked against the rest. Not a
-full VIO input set. Say that in the README.
+- #4 gyro calibration: done (docs/17).
+- The colour-target item: **done**. The YUV422 chroma order is UYVY, measured against a
+  saturated red/blue target (5.3.1), and pinned by `tests/test_decode.c`.
+- The attempt to settle the 18 deg cant: **negative result** (18.3.1). Gravity poses on this
+  device have an accuracy floor of 6–11 deg, which is the same size as the anomaly being
+  tested, so that route is closed rather than retried. The cant now needs the camera optical
+  axis, which is offline work in docs/08.
+- The calibration run for #3 no longer needs coaching at all: a healthy all-four session
+  delivered RGB complete at 30.0000 fps over two 25 s windows with contiguous frame counters
+  and zero host drops.
+
+**Phase 4 — decide the product shape.** Re-opened 2026-10-26, because the answer Phase 1 appeared
+to give was wrong in the direction that matters. A/B do carry the same device timestamp, and RGB
+does have one, on the same clock as the IMU stream. So the product statement is stronger than the
+one written on 2026-10-25: mono pair, RGB and dual IMU all timestamped in one device clock at
+117,821,900 ticks/s, that clock being device uptime rather than wall time and production-coupled
+(it stops when the device stops producing, docs/16 §16.11). What is still missing for a real VIO
+input set is calibration, not protocol: camera intrinsics and camera-to-IMU extrinsics (docs/08),
+and the mono A/B simultaneity contradiction (identical trailer timestamps vs weak image
+correlation) is unresolved. Say that in the README instead.

@@ -101,8 +101,50 @@ the table" does not put `+Z` exactly vertical. Nothing in this session can tell
 those two explanations apart.
 
 What is solid regardless: the in-plane 45-degree rotation, and which sensor axis
-is vertical. `[OPEN]` confirm the cant against an independent reference - a level
-surface under a flat part of the housing, or the camera optical axis from docs/08.
+is vertical.
+
+### 18.3.1 The face test, and why it could not settle the cant `[MEASURED, negative result]`
+
+`tools/face_coach.py` was built to stop assuming headset axes and measure the
+housing instead: rest the device on a face, flip it, difference the pair. The
+operator offered three faces - the two temple arms, the top of the headband, the
+back of the headband. Session: 194,022 IMU samples, gate-certified on attempt 2
+of 10, both chips reading the same geometry.
+
+| measured angle | IMU0 | IMU1 |
+|---|---|---|
+| temple-arm rest vs top-of-band rest | 0.9 deg | 0.9 deg |
+| temple-arm rest vs back-of-headband | 100.1 deg | 100.2 deg |
+| top-of-band rest vs back-of-headband | 101.0 deg | 101.1 deg |
+
+**Useful.** The temple-arm rest and the top-of-band rest give the *same*
+direction to 0.9 deg: they are one reference, not two, so the three faces do not
+form a triad and cannot define a frame between them. The back-of-headband normal
+sits 100-101 deg from that direction on both chips, so the rear pad is raked
+about 10 deg off perpendicular to the crown plane - a housing property, because
+it reproduces across two independently mounted dies.
+
+**Fatal for the cant question.** Pair differencing assumes a flip is an exact
+180 deg reversal, and it was not. Each pair estimates the bias independently as
+`(m(+) + m(-))/2`, and exact flips must give the same bias from every pair:
+
+| pair | IMU0 bias (counts) | IMU1 bias (counts) |
+|---|---|---|
+| temple arms | -1633, +697, -128 | -460, -398, -835 |
+| top of band | -1438, +607, +19 | -283, -310, -659 |
+| back of headband | +137, +2701, +1545 | +439, -2164, +1681 |
+
+Disagreement of 1770 / 2094 / 1673 counts on IMU0 and 899 / 1854 / 2516 on IMU1.
+At 16,400 counts/g that says each rest-and-flip pair was off a true reversal by
+6 to 11 deg: the headset does not settle in a well-defined orientation on these
+faces.
+
+So the 6.7 deg anomaly in 18.2 is the same size as the error of the method that
+would test it. This experiment cannot separate "sloppy poses" from
+"non-orthogonal housing", and re-running the same method will not either - the
+accuracy floor of gravity poses on this device is several degrees wide. `[OPEN]`
+the cant needs a non-gravity reference: the camera optical axis, which is the
+`g_pmd_cad` calibration-region parse in docs/08, not another coached session.
 
 ---
 

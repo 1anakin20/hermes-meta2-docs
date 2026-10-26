@@ -244,7 +244,7 @@ question that occlusion was designed to answer, and it agrees with the occlusion
 
 | Stream | Named by the driver | Verified against our captures | Still open |
 |---|---|---|---|
-| `0x83` | `RGBCameraEndPoint` → `YUV422Image(1280, 720)` | 1,843,232 B frame spacing; luma/chroma phase separation; 11% of pixels with channel spread > 20, max 189; reacts to a centre-only cover (−43%) | which chroma slot is U and which is V; lens position |
+| `0x83` | `RGBCameraEndPoint` → `YUV422Image(1280, 720)` | 1,843,232 B frame spacing; luma/chroma phase separation; 11% of pixels with channel spread > 20, max 189; reacts to a centre-only cover (−43%); **chroma order settled 2026-10-26 by a red/blue target: phase 0 is Cb, phase 2 is Cr, so UYVY** (5.3.1) | lens position |
 | `0x82` | `MonoCamerasEndPoint` → `GrayScale16Image(752, 480)` ×2, tags `0x44` mono0 / `0x55` mono1 | headers at exact 4,096 B spacing, tag histogram 1024/1023; trailer delta 721,952 = 752×480×2 + 32; assembled frames 27–52× more coherent than random; reacts to left and right covers, not centre | which of mono0/mono1 is the left camera |
 | `0x84` | `ToFCameraEndPoint` → `TimeOfFlight16Image(352, 288)` | 202,784 B frame spacing; 435 frames; coherent 36–38× vs random; values clustered 2017–2033; unchanged by every cover | whether it is ranging at all, and its unit mapping |
 | `0x81` | `MultiplexorEndPoint` → IMU0 / IMU1 / microphones / buttons | 2,876 records at exact 256 B spacing, tags `0x66`/`0x77`; 16-byte IMU payload decodes with gravity visible in both accelerometers | mics and buttons have never appeared (see 9.8: the multiplexor mask omits bit 2); 212 unexplained bytes per record |

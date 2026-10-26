@@ -149,6 +149,47 @@ values above 4095: 4,062,632 of 4,063,232  -> this is 16-bit data, not 12-bit
 
 `[VERIFIED]`
 
+### 5.3.1 Which chroma phase is U and which is V `[MEASURED, 2026-10-26]`
+
+The phase statistics above put luma at the odd phases and chroma at the even ones,
+which leaves two candidates: UYVY or VYUY. Nothing measured so far could separate
+them, because every capture was near-neutral. A saturated target separates them.
+
+Method: `examples/meta2_rgb_color.c` (meta2lib) inside ONE gate-certified session
+(accepted on attempt 4 of 12), pointed at a monitor showing full-screen red, then
+full-screen blue, 25 s each. Mean of the central half of each frame, so a full-screen
+target is at its most uniform and lens shading is smallest. 750 complete frames per
+window, counters contiguous, host dropped 0.
+
+| window | phase 0 | phase 2 | luma | phase0 - phase2 |
+|---|---|---|---|---|
+| red | 110.30 | 189.41 | 71.85 | -79.11 |
+| blue | 217.20 | 118.71 | 29.49 | +98.49 |
+
+The two phases trade places between the colours on **every single frame** - red
+range -79.50..-78.74 (sd 0.15), blue range +98.26..+98.63 (sd 0.05). Phase 2 rises
+with red and falls with blue, so **phase 2 is Cr and phase 0 is Cb: the 4-byte group
+is U Y V Y, i.e. UYVY**, which is what the vendor type name suggested and what
+meta2lib already defaults to.
+
+The magnitudes corroborate the ordering rather than just the sign. BT.601 full range
+gives Y 76.2 / Cb 85.0 / Cr 255.5 for pure red and Y 29.1 / Cb 255.5 / Cr 107.3 for
+pure blue; measured luma came out 71.85 and 29.49, essentially those values. The
+chroma values sit pulled toward 128 because the screen filled only part of the
+sampled region - solving for the fill fraction from Cr gives 0.48 under red and 0.70
+under blue, and those two fractions predict the other three numbers to within a few
+counts. The opposite assignment would put Cr at 110.3 under red, which no saturated
+red screen produces.
+
+Side result worth keeping: both windows delivered exactly 750 frames in 25.000 s =
+30.0000 fps with no gap in the frame counters, against the 30.0013 fps the calibrated
+clock implies (docs/16). In a healthy session RGB is delivered complete.
+
+Pinned by `tests/test_decode.c`, which decodes the measured red-window bytes and
+fails if a packing change turns them blue.
+
+---
+
 ### It is an image, and the row stride is 1280
 
 Established by autocorrelation of the 16-bit sample stream — mean `|v[i] - v[i+L]|` for
