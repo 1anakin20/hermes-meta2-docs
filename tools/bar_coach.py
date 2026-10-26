@@ -54,6 +54,7 @@ S = {
     "page_fps": 0.0,
     "screen_h": 0,
     "posted_at": None,
+    "wall_epoch": None,          # wall-clock time the page's performance.now()=0
 }
 
 LCG_A = 1103515245
@@ -112,6 +113,7 @@ PAGE = """<!doctype html>
 </div>
 <script>
 let i=0, run=false, t0=0, buf=[], raf=0, lastPost=0, mode='seq', step=24, secs=20;
+let wallEpoch = 0;
 const cv=document.getElementById('cv'), cx=cv.getContext('2d');
 const hud=document.getElementById('hud');
 
@@ -186,6 +188,12 @@ document.getElementById('start').onclick = async () => {
   document.getElementById('ui').style.display='none';
   cv.style.display='block'; hud.style.display='block';
   i=0; buf=[]; lcgAt=-1; run=true; t0=performance.now(); lastPost=performance.now();
+  /* performance.now() is relative to page load. Date.now() is wall clock. The
+     difference is the page clock's wall epoch, and without it a frame index cannot
+     be placed on the wall clock at all - only relative to other frames. */
+  wallEpoch = Date.now() - t0;
+  fetch('/start2', {method:'POST', body:JSON.stringify({wall_epoch: wallEpoch/1000})})
+    .catch(()=>{});
   raf = requestAnimationFrame(frame);
 };
 document.getElementById('stop').onclick = () => { if (run) finish(); };
@@ -237,7 +245,15 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         d = self._body()
-        if self.path.startswith("/start"):
+        # /start2 before /start: startswith("/start") also matches "/start2", and
+        # matching it there silently restarted the run and discarded the epoch.
+        if self.path.startswith("/start2"):
+            with LOCK:
+                S["wall_epoch"] = float(d.get("wall_epoch", 0))
+                with open(STATE, "w") as f:
+                    json.dump(S, f, indent=1)
+                self._send(200, "ok", "text/plain")
+        elif self.path.startswith("/start"):
             with LOCK:
                 S["mode"] = d.get("mode", S["mode"])
                 S["seconds"] = int(d.get("secs", S["seconds"]))
