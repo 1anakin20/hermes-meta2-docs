@@ -130,10 +130,16 @@ Ranked by how much is known. None has been executed.
    `[UNVERIFIED]`
 
 `[UNVERIFIED]` `ReplaceDevice` as an INF directive to win against a Windows
-Update rebind: not used in the INF, because no in-box INF in that guest uses it
-(`findstr /s /i /m ReplaceDevice C:\Windows\INF\*.inf` returned nothing) and the
-syntax could not be confirmed. It is deliberately absent rather than guessed at,
-since an unrecognised directive can fail the whole INF.
+Update rebind. It is deliberately absent rather than guessed at, because an
+unrecognised directive can fail the whole INF.
+
+Evidence gathered: `C:\Windows\INF` on that guest holds 662 `.inf` files and
+`findstr /s /i /m ReplaceDevice` matches none of them. The same command does
+work on that tree - `AddService` matches `oem2.inf` and `oem3.inf`. So the
+negative result is real but narrow: it covers the class INFs in `C:\Windows\INF`,
+not the driver packages in the DriverStore, which this guest does not expose at
+the path searched. The directive's syntax was not confirmed either way, because
+the search backend was returning no results (see 20.7).
 
 ---
 
@@ -203,3 +209,6 @@ why they cannot be run against the device yet.
 3. Whether Windows Update rebinds `USB\VID_2CFA&PID_00F3` on Windows 11, and
    what actually wins if it does.
 4. The GUI, which is the end goal, is not started.
+5. `ReplaceDevice` syntax, and whether it is even the right mechanism against a
+   Windows 11 rebind. Not confirmable from this environment while the search
+   backend returns nothing.
