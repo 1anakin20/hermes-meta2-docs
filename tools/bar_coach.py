@@ -185,12 +185,26 @@ document.getElementById('start').onclick = async () => {
   SEED = s.seed;
   try { await document.documentElement.requestFullscreen(); } catch(e) {}
   size();
+  /* A countdown, so the capture tool and the page do not have to be started in
+     lockstep. The operator starts the recorder, then clicks START, then has four
+     seconds to put the headset down and step back. */
   document.getElementById('ui').style.display='none';
   cv.style.display='block'; hud.style.display='block';
+  cx.fillStyle='#000'; cx.fillRect(0,0,cv.width,cv.height);
+  cx.fillStyle='#fff'; cx.textAlign='center';
+  cx.font = Math.round(cv.height*0.35) + 'px system-ui,sans-serif';
+  const cd = performance.now() + 4000;
+  await new Promise(res => {
+    (function tick(){
+      const left = (cd - performance.now())/1000;
+      cx.fillStyle='#000'; cx.fillRect(0,0,cv.width,cv.height);
+      if (left <= 0) { res(); return; }
+      cx.fillStyle='#fff';
+      cx.fillText(Math.ceil(left), cv.width/2, cv.height/2 + cv.height*0.12);
+      requestAnimationFrame(tick);
+    })();
+  });
   i=0; buf=[]; lcgAt=-1; run=true; t0=performance.now(); lastPost=performance.now();
-  /* performance.now() is relative to page load. Date.now() is wall clock. The
-     difference is the page clock's wall epoch, and without it a frame index cannot
-     be placed on the wall clock at all - only relative to other frames. */
   wallEpoch = Date.now() - t0;
   fetch('/start2', {method:'POST', body:JSON.stringify({wall_epoch: wallEpoch/1000})})
     .catch(()=>{});
