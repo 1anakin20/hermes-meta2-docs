@@ -22,7 +22,7 @@ that has not been executed anywhere.
 | link speed | SuperSpeed, 5 Gbps |
 
 `[MEASURED]` The device does **not** implement Microsoft OS descriptors.
-`scratch/msos_probe.c`:
+`tools/msos_probe.c` (build: `gcc msos_probe.c -o msos_probe $(pkg-config --cflags --libs libusb-1.0)`):
 
 ```
 string 0xEE: FAILED LIBUSB_ERROR_PIPE
