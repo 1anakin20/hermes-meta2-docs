@@ -48,6 +48,7 @@ import sys
 TICK_HZ = 117821900.0          # docs/17: calibrated from a 400 s coached session
 MONO_TICKS_PER_FRAME = 1963229.0   # docs/16: measured mono cadence
 MONO_FPS = TICK_HZ / MONO_TICKS_PER_FRAME
+SLACK = 3.0   # seconds of capture kept either side of the target window
 
 LCG_A, LCG_C = 1103515245, 12345
 
@@ -102,9 +103,23 @@ def frame_index(ts_list):
     return [int(round((r["ts"] - t0) / MONO_TICKS_PER_FRAME)) for r in ts_list]
 
 
-def fit_phase(frames, disp_t, disp_b, T, verbose=False):
+def fit_phase(frames, disp_t, disp_b, T, verbose=False, window=None):
+    global SLACK
     """Search the exposure phase that best explains this camera's brightness
-    sequence. Returns (t_ref, rms, corr, levels)."""
+    sequence. Returns (t_ref, rms, corr, levels, align_score, used).
+
+    window is (t_start, t_end) of the target run in wall time. Frames outside it are
+    dropped before anything is fitted. A capture is normally longer than the target
+    run - this one started 11.95 s, or 716 display frames, before the screen began
+    flickering - and those frames are not weak evidence, they are noise: their
+    brightness tracks the room, not the commanded sequence, and including them both
+    dilutes the correlation and puts the alignment out of reach of the search."""
+    if window is not None:
+        lo, hi = window
+        slack = SLACK
+        frames = [r for r in frames if lo - slack <= r["host_wall"] <= hi + slack]
+        if len(frames) < 12:
+            return None, 0.0, 0.0, (0.0, 0.0), 0.0, len(frames)
     levels = [r["mean"] for r in frames]
     lo = min(levels)
     hi = max(levels)
@@ -114,7 +129,7 @@ def fit_phase(frames, disp_t, disp_b, T, verbose=False):
     L0 = s[max(0, int(0.10 * (len(s) - 1)))]
     L1 = s[min(len(s) - 1, int(0.90 * (len(s) - 1)))]
     if L1 - L0 <= 1e-9:
-        return None, 0.0, 0.0, (lo, hi), 0.0
+        return None, 0.0, 0.0, (lo, hi), 0.0, len(levels)
 
     D = disp_t[1] - disp_t[0]
     n = len(disp_t)
@@ -178,7 +193,10 @@ def fit_phase(frames, disp_t, disp_b, T, verbose=False):
     mb = sum(disp_b) / n
     sb = (sum((v - mb) ** 2 for v in disp_b) / n) ** 0.5
 
-    max_shift = 200
+    # Bounded by the window filter above: nothing further out can matter, because
+    # every kept frame is within `slack` of the target run. The residual is clock
+    # skew between the monitor and this machine plus the drain lag.
+    max_shift = int(slack / D) + 40
     best_s, best_score = None, -1.0
     for sh in range(-max_shift, max_shift + 1):
         acc = 0.0
@@ -196,7 +214,7 @@ def fit_phase(frames, disp_t, disp_b, T, verbose=False):
     if best_s is None or best_score < 0.40:
         # Below this the camera is not tracking the target: the screen is not in
         # view, or the scene's own brightness changes are drowning the target.
-        return None, 0.0, 0.0, (L0, L1), best_score
+        return None, 0.0, 0.0, (L0, L1), best_score, len(levels)
     if verbose:
         print("    frame alignment: camera frame k <-> displayed frame %+.1f%+d, "
               "correlation %.3f" % (j0[0], best_s, best_score))
@@ -228,6 +246,19 @@ def fit_phase(frames, disp_t, disp_b, T, verbose=False):
     t_ref, sse = best
     p = predicted(t_ref)
     rms = (sse / len(levels)) ** 0.5
+
+    # Uncertainty on the phase, from the curvature of the residual near its minimum.
+    # SSE(t) ~ SSE_min + a (t - t*)^2, and for a least-squares fit with residual
+    # variance s^2 the parameter variance is s^2 / a. Without this, a number like
+    # "0.102 ms" carries no information about whether it differs from zero.
+    N = len(levels)
+    s2 = sse / max(1, N - 1)
+    delta = D / 200.0
+    def sse_at(t):
+        pv = predicted(t)
+        return sum((pv[i2] - levels[i2]) ** 2 for i2 in range(N))
+    a = (sse_at(t_ref + delta) - 2.0 * sse + sse_at(t_ref - delta)) / (2.0 * delta * delta)
+    sigma = (s2 / a) ** 0.5 if a > 0 else float("inf")
     m = sum(levels) / len(levels)
     mp = sum(p) / len(p)
     num = sum((levels[i] - m) * (p[i] - mp) for i in range(len(levels)))
@@ -236,7 +267,7 @@ def fit_phase(frames, disp_t, disp_b, T, verbose=False):
     if verbose:
         print("    levels %.1f..%.1f  fitted L0=%.1f L1=%.1f  rms=%.2f  corr=%.3f"
               % (lo, hi, L0, L1, rms, corr))
-    return t_ref, rms, corr, (L0, L1), best_score
+    return t_ref, rms, corr, (L0, L1), best_score, len(levels), sigma
 
 
 def bar_analysis(by_tag, h, verbose=False):
@@ -276,12 +307,15 @@ def main():
     if len(sys.argv) < 2:
         print(__doc__)
         return 2
+    global SLACK
     prefix = sys.argv[1]
     coach = "/home/hermes/work/metavision/re"
     mode = None
     verbose = "--verbose" in sys.argv
     for a in sys.argv[2:]:
-        if a.startswith("--coach-dir="):
+        if a.startswith("--slack="):
+            SLACK = float(a.split("=", 1)[1])
+        elif a.startswith("--coach-dir="):
             coach = a.split("=", 1)[1]
         elif a.startswith("--mode="):
             mode = a.split("=", 1)[1]
@@ -393,34 +427,53 @@ def main():
               % abs(1.0 / T - 1.0 / D))
 
     print("\nSEQ MODE - exposure phase per camera")
+    print("  fitting only frames inside the target window (plus %.1f s of slack):"
+          " %.3f .. %.3f wall" % (SLACK, disp_t[0], disp_t[-1] + D))
+    window = (disp_t[0], disp_t[-1] + D)
     fitted = {}
     for tag in sorted(by_tag):
-        if len(by_tag[tag]) < 12:
-            print("  tag 0x%02x: only %d frames, not fitting" % (tag, len(by_tag[tag])))
+        inside = [r for r in by_tag[tag]
+                  if window[0] - SLACK <= r["host_wall"] <= window[1] + SLACK]
+        if len(inside) < 12:
+            print("  tag 0x%02x: only %d of %d frames fall inside the target window,"
+                  " not fitting" % (tag, len(inside), len(by_tag[tag])))
             continue
-        print("  tag 0x%02x:" % tag)
-        t_ref, rms, corr, lv, align = fit_phase(by_tag[tag], disp_t, disp_b, T, verbose)
+        print("  tag 0x%02x: %d of %d frames inside the target window"
+              % (tag, len(inside), len(by_tag[tag])))
+        t_ref, rms, corr, lv, align, used, sigma = fit_phase(
+            by_tag[tag], disp_t, disp_b, T, verbose, window)
         if t_ref is None:
             print("    no fit: this camera's brightness does not track the commanded"
-                  " sequence (best correlation %.3f). The screen is not in its field of"
-                  " view, or the scene's own brightness changes are larger than the"
-                  " target's." % align)
+                  " sequence (best correlation %.3f over %d frames). Either the screen"
+                  " is not in its field of view, or the room's own brightness changes"
+                  " are larger than the target's." % (align, used))
             continue
-        fitted[tag] = (t_ref, rms, corr)
+        fitted[tag] = (t_ref, rms, corr, sigma)
         phase = ((t_ref - disp_t[0]) % D) / D
         print("    exposure starts %.4f of a display frame after the display frame "
-              "boundary (%.3f ms), rms %.2f counts" % (phase, phase * D * 1000.0, rms))
+              "boundary (%.3f ms), rms %.2f counts, phase uncertainty %.3f ms"
+              % (phase, phase * D * 1000.0, rms, sigma * 1000.0))
 
     tags = sorted(fitted)
     if len(tags) == 2:
         a, b = tags
         dt = fitted[a][0] - fitted[b][0]
+        sdt = (fitted[a][3] ** 2 + fitted[b][3] ** 2) ** 0.5
         print("\nRESULT")
         print("  tag 0x%02x exposure starts %.3f ms %s tag 0x%02x's exposure"
               % (a, abs(dt) * 1000.0, "before" if dt < 0 else "after", b))
         print("  tag 0x%02x minus tag 0x%02x = %+.3f ms (%.4f display frames, %.4f mono frame periods)"
               % (a, b, dt * 1000.0, dt / D, dt / T))
-        print("  |offset| %.3f ms vs one mono frame period %.3f ms" % (abs(dt) * 1000.0, T * 1000.0))
+        print("  uncertainty of that difference: +-%.3f ms (1 sigma, from the curvature"
+              " of each fit)" % (sdt * 1000.0))
+        print("  |offset| %.3f ms vs one mono frame period %.3f ms  ->  %.2f%% of a frame"
+              % (abs(dt) * 1000.0, T * 1000.0, 100.0 * abs(dt) / T))
+        if abs(dt) < 3 * sdt:
+            print("  The offset is NOT distinguishable from zero: it is %.1f sigma."
+                  % (abs(dt) / sdt if sdt > 0 else 0.0))
+        else:
+            print("  The offset is %.1f sigma from zero - that is a real skew, not noise."
+                  % (abs(dt) / sdt))
         print("  rms of the two fits: %.2f / %.2f counts; correlation %.3f / %.3f"
               % (fitted[a][1], fitted[b][1], fitted[a][2], fitted[b][2]))
         if abs(dt) > 0.8 * T:
