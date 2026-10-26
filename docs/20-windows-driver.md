@@ -129,6 +129,19 @@ Ranked by how much is known. None has been executed.
    sidesteps the catalog requirement, and how, has not been verified here.
    `[UNVERIFIED]`
 
+`[DECIDED 2026-10-26]` Route for now: **unblock the Windows work with Zadig on the
+development machine**, and treat catalog signing as a distribution decision to be
+made later, once there is an app worth distributing. `driver/meta2.inf` stays in
+the repository as the artifact that gets signed when that decision is made - it is
+not deleted, because the work that went into its shape is the work that has to be
+re-done otherwise.
+
+Next verified step, not yet run: bind WinUSB with Zadig (or libwdi's command-line
+`wdi-simple`, which is what Zadig is built on) against `2cfa:00f3`, then run a
+cross-built harness against the device on real Windows. Whether Zadig sidesteps
+the catalog requirement, and how, is still `[UNVERIFIED]` - it has not been run
+here.
+
 `[UNVERIFIED]` `ReplaceDevice` as an INF directive to win against a Windows
 Update rebind. It is deliberately absent rather than guessed at, because an
 unrecognised directive can fail the whole INF.
