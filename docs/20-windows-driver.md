@@ -832,6 +832,60 @@ delivered `mux = 0 B` for the whole window while the cameras kept streaming at
 mono against a 3.33 GB ring. Raised to 20 s, and the tool prints the total
 allocation.
 
+### `muxkeep` solved the mux: 3 of 3 attempts live, ~400 records/s steady
+
+`[MEASURED]` `muxasync=8 muxhz=100 muxkeep` - 8 async submask writes in flight, paced at
+100/s, **every write asserting `0x1b`, never taken low**. 2,430 writes completed per
+attempt (97/s), `errors=0`:
+
+| attempt | steady mux records/s (per beat) | total mux | arm |
+|---|---|---|---|
+| 1 | 399, 397, 400, 403 | 17,282 records (691/s) | 272/135 |
+| 2 | 401, 400, 396 | 17,282 records (691/s) | 272/135 |
+| 3 | 401, 399, 402 | 17,513 records (701/s) | 273/134 |
+
+`[MEASURED]` Attempt 3: **IMU0 344.2/s, IMU1 356.1/s**, mono 87.32 MB/s, RGB 55.30 MB/s on
+every beat, `host dropped bytes total=0`, mono completeness 99.8%, RGB gaps 99.8% exact,
+RGB 44.2 complete frames/s. Every endpoint at or above nominal in the same window.
+
+`[MEASURED]` The deassert was the culprit. Alternating the submask between 0 and `0x1b` -
+leaving it low half the time - gave 2 live out of 3. Never taking it low gave 3 out of 3.
+
+### The gate was rejecting the best session, and why
+
+`[MEASURED]` All three attempts were called `FROZEN` with coverage 0.630, 0.634, 0.643.
+Their estimator clocks were **115.29, 115.99, 117.74 MHz** - against a calibrated
+117,821,900 ticks/s, that is 0.978, 0.985, 0.999.
+
+`[DIAGNOSED]` `META2_MUX_CLOCK_HZ = 183 MHz` is a proxy for what a *bursty* healthy Linux
+stream reads (182.0-182.8 MHz measured in `docs/10` §10.8). A dense, uniform Windows stream
+reads the true oscillator rate instead, so the proxy scores it at 0.64 and the gate re-armed
+it away.
+
+`[FIXED]` `coverage_calibrated` runs the same estimator against `META2_TICKS_PER_S` and is
+accepted as an alternative to the proxy criterion, at the same 0.85 fraction. Measured
+separation on both platforms:
+
+| | estimator clock | `cov_cal` |
+|---|---|---|
+| healthy Windows | 115.3 - 117.7 MHz | 0.978 - 0.999 |
+| healthy Linux | 182.0 - 182.8 MHz | 1.54 - 1.55 |
+| stalled Windows | 52.6 - 55.1 MHz | 0.45 - 0.47 |
+| starved Linux | 4.7 - 14.0 MHz | 0.04 - 0.12 |
+
+Accepted candidates sit 2x above the threshold, rejected candidates 2x below it - the same
+margin the proxy threshold was chosen for. The proxy criterion is kept, not replaced.
+Reproduced as two synthetic cases in `tests/test_health.c`.
+
+`[MEASURED]` The probe cannot see liveness at all: the mux delivered **8,096 records in a
+2 s probe when live and 7,460 when stalled**, because the backlog has not drained yet. The
+tool now prints the mux rate over the last 60% of the beats, which separates 401/s from 25/s.
+
+`[OPEN]` At this rate the mux packet counter stops advancing cleanly: `cnt=140395` appears
+on three consecutive records in attempt 3, counter span 17,886 over 17,513 records, and
+attempt 1 reported a counter span of 4,276,887,864 - a value no stream of 17,282 records
+can produce. Records are not byte-identical duplicates (0 of 17,512). Not explained.
+
 ### The mux streams at ~400 records/s on Windows - and it is bimodal
 
 `[MEASURED]` `muxasync=8 muxhz=100` (paced pipeline, ~97 submask writes/s, `errors=0`):
