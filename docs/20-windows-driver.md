@@ -832,6 +832,34 @@ delivered `mux = 0 B` for the whole window while the cameras kept streaming at
 mono against a 3.33 GB ring. Raised to 20 s, and the tool prints the total
 allocation.
 
+### Flooding EP0 makes the mux worse, not better
+
+`[MEASURED]` `muxasync=8` removed the round-trip bound completely: **961 mux-submask
+writes/s**, ten times what a synchronous loop reached. The mux delivered *less*:
+
+| writes/s | steady mux records/s | ratio |
+|---|---|---|
+| 6.7 | 6.2 | 0.93 |
+| 13.4 | 11.4 | 0.85 |
+| 48.9 | 53.1 | 1.09 |
+| **961** | **22-26** | **0.026** |
+
+`[MEASURED]` The 1:1 relationship holds up to ~50 writes/s and inverts above it. The
+write rate has an optimum near 50/s; past it, extra EP0 traffic costs mux records.
+
+`[MEASURED]` It also disturbed the cameras in attempt 1: mono fell to 39.69 and 48.51 MB/s
+over `t=5 -> 15` (RGB 26.63 and 32.53) before recovering to 87.32 by `t=20`. Attempts 2 and
+3 held 87.3 / 55.3 MB/s throughout. The arm took one `LIBUSB_ERROR_TIMEOUT` in both of
+those attempts (`270 ok / 137 fail`) against `272 / 135` in attempt 1.
+
+`[INFERRED]` Each submask write re-triggers the mux producer. A write that lands while a
+batch is in progress appears to interrupt it, so a flooded pipeline never lets one
+finish. Unproven; it is the shape the numbers have.
+
+`[OPEN]` The gap between 49 writes/s (53 records/s) and 961 writes/s (25 records/s) is
+unswept. `muxasync` now paces: completions park and the pump hook releases them at
+`muxhz`, so rates a synchronous loop cannot reach are reachable at a chosen rate.
+
 ### The mux is polled, not streamed: ~1 record per submask write
 
 `[MEASURED]` `muxhz=50` issued 1,223 mux-submask edges per attempt (49/s). Steady-state
