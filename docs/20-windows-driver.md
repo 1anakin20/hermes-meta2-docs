@@ -832,7 +832,53 @@ delivered `mux = 0 B` for the whole window while the cameras kept streaming at
 mono against a 3.33 GB ring. Raised to 20 s, and the tool prints the total
 allocation.
 
-### The mux rate tracks the control-transfer rate, one record per transfer
+### The mux is polled, not streamed: ~1 record per submask write
+
+`[MEASURED]` `muxhz=50` issued 1,223 mux-submask edges per attempt (49/s). Steady-state
+mux delivery after the backlog flush:
+
+| attempt | edges/s | steady mux records/s | ratio |
+|---|---|---|---|
+| 1 | 48.9 | 46.2 | 0.94 |
+| 2 | 48.9 | 53.3 | 1.09 |
+| 3 | 48.9 | 53.1 | 1.09 |
+
+Combined with the earlier pair - assert-only at 6.7 writes/s gave 6.2 records/s,
+`muxtoggle` at 13.4 writes/s gave 11.4 records/s - the rate is **one record per write
+of `0x0009/0x0004`**, over four runs spanning a 5x range in write rate.
+
+`[INFERRED]` EP `0x81` is polled by host control traffic, not streamed by the device.
+Its rate is therefore bounded by how fast one thread can write that submask. A
+synchronous write costs a full control round trip: the arm issues 407 control
+transfers in 8.15 s, about 20 ms each, and a sustained poll measured ~98 transfers
+in ~1 s, about 10 ms each. That caps a single-threaded synchronous poll near
+100 records/s against a nominal ~350/s.
+
+`[MEASURED]` This did not disturb anything else: arm shape stayed `272 ok / 135 fail`
+on all three attempts (the healthy shape), mono 87.32 MB/s and RGB 55.30 MB/s on every
+beat, `host dropped bytes total=0`, mono completeness 99.6%, RGB gaps 99.8% exact.
+
+### What this predicts about the old Linux numbers
+
+`[OPEN]` `docs/10` §10.5 records the Linux mux as bimodal - **46.4 / 46.6 records/s in
+two runs and 236.6 / 280.3 / 375.9 in three** - with all five runs using the same
+`sustain = assert+deassert as fast as possible` recipe, and asks which is the device's
+rate and what selects between them. Under the polling model there is no single device
+rate: the rate is whatever the keepalive loop's control-transfer completion rate
+happened to be in that run. The 46.4/s Linux figure sits right on the ~46-53/s Windows
+figure from 49 writes/s.
+
+`[OPEN]` Not proven. The test is to run the Linux recipe with `muxhz` set and read the
+edge counter: if Linux mux records/s lands on the edge rate, the bimodality is a host
+artefact and not a device state.
+
+### Added: `muxasync=N`
+
+Keeps N async control transfers writing `0x0009/0x0004` in flight, alternating 0 and
+the mux mask, resubmitted from the pump thread. This removes the round-trip bound: the
+rate becomes whatever the device will service on EP0. It prints completions/s so mux
+records/s can be compared against writes/s directly.
+
 
 `[MEASURED]` Two sustain shapes, same arm, same window:
 
