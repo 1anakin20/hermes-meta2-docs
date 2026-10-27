@@ -832,7 +832,53 @@ delivered `mux = 0 B` for the whole window while the cameras kept streaming at
 mono against a 3.33 GB ring. Raised to 20 s, and the tool prints the total
 allocation.
 
-### The mux free-runs: `muxhz` is not the control variable once the submask stays asserted
+### The bogus mux counter is `0xFEEDBAAB` — the record's own frame magic
+
+`[MEASURED]` The diagnostic named the records, and they are not corruption. Counter sequences run:
+
+```
+609582 -> 4276992683 -> 609584      (tag 102, i=23168)
+648332 -> 4276992683 -> 648334      (tag 119, i=26770)
+629766 -> 0          -> 629768      (tag 119, i=8520)
+```
+
+`4276992683 = 0xFEEDBAAB`, which is the low word of `MUX_MAGIC` — the record header is
+`00 00 00 00 ab ba ed fe`, and bytes +4..+7 read little-endian as exactly that. **The counter
+slot at +252 holds the frame magic.** The value reappeared verbatim across separate runs, and
+the counter sequence continues straight through the record, so it is a marker-shaped record,
+not a damaged sample.
+
+`[MEASURED]` There are only two to four of them per window of 34,033 or 66,764 records — but
+`counter_span` is a min/max, so they own it: spans of 4,276,992,683 and 4,276,406,310 for
+windows of ~17,000 records. `[FIXED]` `META2_MUX_COUNTER_SENTINEL` is now excluded from the
+span, and `outliers=N` is printed.
+
+## Mic timestamps are not always on the IMU clock
+
+`[MEASURED]` In the `muxhz=200 mux=0x1b` run, the first IMU record was at
+`ts=760,074,659,026` (uptime 6451.0 s, matching the tool's own uptime line) and the first MICS
+record immediately after it was at `ts=800,394,829,469` — **40,320,065,410 ticks, 342.2 s of
+device time, AHEAD**. The window ended at uptime 6476.0 s; those mic records claim 6793.3 s.
+
+`[MEASURED]` In the `mux=0x1f muxhz=400` run the mic timestamps *did* line up: first IMU at
+806,370,947,089 (uptime 6844.0 s) and max MICS at 810,750,843,100 (uptime 6881.2 s, against a
+window ending at 6869 s). So this is not a fixed epoch difference between the feeds.
+
+`[MEASURED]` The difference between the two runs: the first had `mux=0x1b`, where mics are not
+asserted in sustain and the mic records are backlog only; the second had live mics.
+`[OPEN]` whether backlog mic records carry a stale stamp, or whether the mux buffer flushes
+per-feed queues that are not chronologically interleaved.
+
+`[FIXED]` The estimator now runs on the **IMU feeds** whenever they are present, because cadence
+is a per-feed property and the IMU feeds are what it was calibrated on. Measured effect on the
+synthetic reproduction of the `0x1f` stream: `cov_cal 0.9610 → OK`, where the same stream scored
+`coverage=0.0000 → FROZEN` and was re-armed away. `span_clock` for that stream is 113.22 MHz
+instead of 1788.05 MHz. `est=imu|all` and `outliers=N` are printed so the choice is visible.
+
+`[MEASURED]` The mic records' internal spacing is consistent in both runs where it can be read:
+54,008 ticks = 458.4 µs between mic timestamp groups.
+
+## The mux free-runs: `muxhz` is not the control variable once the submask stays asserted
 
 `[MEASURED]` `muxkeep` with `muxasync=8`, `mux=0x1b`, write rate swept 50 → 400/s:
 
