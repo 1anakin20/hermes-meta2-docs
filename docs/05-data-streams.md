@@ -231,10 +231,30 @@ record:
 +16   u32 0
 +20   u32 counter        102, 103, ... 152 — +1 per frame, monotonic across all 51
 +24   4 x u16            (18345, 25689, 28331, 32322), (19879, 26710, 29866, 32832),
-                         (18853, 26199, 28587, 32323) — meaning [UNKNOWN]
+                         (18853, 26199, 28587, 32323) — image data, see 5.3.2
 ```
 
 `[VERIFIED]`
+
+### 5.3.2 The 32-byte record is a boundary, and the samples begin at +24
+
+Corrected 2026-10-27 by 16.3.2 and re-measured here. The block straddles the magic: it
+starts at **+0 − 8** and ends at **+23**, so the `+24` field above is not a header field at
+all — it is the first eight samples.
+
+That is the only reading in which the arithmetic closes. 24 + 1,843,200 = 1,843,224, and the
+next record's block starts at 1,843,232 − 8 = 1,843,224: no overlap, no gap. Treating the
+payload as starting at +32 makes this frame's samples run into the next frame's trailer.
+
+`[VERIFIED, burst83.bin, 74 magic hits]` The alternating UYVY phases begin exactly at
+`magic+24` and continue through `magic+39`: even offsets mean 125.8–133.9 with stdev 1.9–3.4
+(chroma, neutral near 128) and odd offsets mean 24.0–33.1 with stdev 2.5–3.7 (luma). A header
+field does not alternate chroma/luma with a scene's statistics.
+
+Consequence for the library: `META2_RGB_PAYLOAD_OFFSET` is 24. Decoding at `offset + 32`,
+which both `meta2_capture` and `meta2_rgb_color` did, shifted every frame 8 bytes — four
+pixels — late. The chroma-order conclusion in 5.3.1 is unaffected: 8 bytes is two whole UYVY
+quads, so the phase is unchanged.
 
 50 complete frames were recovered from that capture. Frame 0 versus frame 1: sampled mean
 `|diff|` = 1,022 with only **3.8%** of samples identical. Distinct acquisitions, not one

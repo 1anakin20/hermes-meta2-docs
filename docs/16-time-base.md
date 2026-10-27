@@ -148,6 +148,13 @@ The block is a **boundary**: it closes the previous frame and heads the next, wh
 finalises a frame on reaching it. What has been treated as the record header magic is the middle of
 the trailer.
 
+**Confirmed again on 2026-10-27, and it now decides where the payload starts.** Over
+`burst83.bin` (74 magic hits) the alternating UYVY phases begin at `magic+24` and run through
+`magic+39` — even offsets mean 125.8–133.9 (chroma, neutral near 128), odd offsets mean
+24.0–33.1 (luma). The block therefore ends at `magic+23` and the samples begin at `magic+24`,
+which is the only offset where 24 + 1,843,200 lands exactly on the next record's block start
+at 1,843,232 − 8. See 5.3.2. `META2_RGB_PAYLOAD_OFFSET` is 24.
+
 **RGB does have a device timestamp.** `probe2_ep83.bin`, 25 records, byte distance between magics
 exactly 1,843,232 in all 24 gaps (100% complete frames, `probe2.log`: 12.0 s, 3.94 MB/s, 13 timeouts):
 
