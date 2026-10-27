@@ -770,6 +770,50 @@ allowance)` at the measured rates, 3.33 GB mono and 2.22 GB RGB for a 25 s windo
 with `cap_mb=N` to override. A run that drops now prints the size that would have
 held it.
 
+### A session that streamed and a session that stalled, same command
+
+`[MEASURED]` `warm=7e fast` at `queue=8` gave coverage **1.1091** and `health=OK`
+one run, then coverage **0.5380 / 0.5731 / 0.1001** and `health=STARVED` on the
+next run of the *same command*, with the ring cap fixed (`total=0` dropped) and the
+arm shape identical every time at `272 ok / 135 fail` in 8.1-8.2 s. So neither the
+ring nor the arm shape explains it.
+
+`[MEASURED]` What differs is the trailer timestamp. The streaming session's first
+mux record sat at **3,626,241,405 ticks = 30.8 s of device uptime**. The stalled
+session's first mux record sat at **154,818,126,987 ticks = 1314 s = 21.9 min of
+device uptime**. The trailer clock is device uptime rather than wall time (docs/16
+§16.4), so this is free to read, and the tool now prints it.
+
+`[MEASURED]` The stall is endpoint-selective. In the starved attempt the mux kept
+delivering while the cameras died: mono advanced 1.18, 1.57, 1.05 and 0.00 MB in
+successive 5 s beats against a nominal 86.6 MB/s for the pair, and RGB advanced
+0.066 MB in 20 s against a nominal 55.3 MB/s. The 699 MB of mono in the totals was
+695 MB of backlog plus 4 MB in 20 s.
+
+`[INFERRED]` The device's ability to hold a stream degrades with how long it has
+been up, or armed, and a power cycle restores it. Two data points, one confound
+each: the good run was the first run after a replug. Not established.
+
+`[OPEN]` Test: replug, run immediately, then run again ~20 min later without
+replugging, and read the uptime line. If coverage tracks uptime, this is a device
+state problem and the library's job is to detect it and say so, not to fight it.
+
+### What `coverage` actually measures (do not retune the constant)
+
+`[MEASURED]` `coverage = median(consecutive mux timestamp delta) x record rate /
+META2_MUX_CLOCK_HZ`, and `META2_MUX_CLOCK_HZ` is **183 MHz**, not the calibrated
+tick rate of 117,821,900 Hz. That is deliberate and documented in
+`include/meta2/health.h`: the constant is a proxy for the median-delta estimator,
+the 0.85 threshold was tuned against that same estimator, and healthy Linux runs
+measured **0.99-1.01** with it. Changing the constant without re-measuring the
+threshold moves the gate blind.
+
+`[MEASURED]` The estimator is burst-sensitive: it reads the typical *within-burst*
+spacing, so a session that delivers in clusters scores low even when its min/max
+span covers the window. In the starved attempt the span was 146.35 MHz x window
+(124% of it) while coverage read 0.1001. Both numbers are correct; they measure
+different things, and the span is the one that misleads on a clustered run.
+
 `[OPEN]` The fix is now a knob, not yet a proven default: `meta2_set_bulk_timeout()`
 and `META2_BULK_TIMEOUT_MS`, default still 1500 because every Linux measurement
 was made at 1500. `rd_ms=10000` has to be measured on the real machine before the
