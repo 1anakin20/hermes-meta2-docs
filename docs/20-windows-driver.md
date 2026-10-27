@@ -639,12 +639,40 @@ calling `libusb_handle_events()` while the arm runs:
 | library, `queue=1` | 4 (3 readers + main) | 0 B |
 | library, `queue=8` | 2 (1 pump + main) | 0 B |
 
-`[OPEN]` Whether that is the mechanism or a coincidence of these four runs is not
-yet settled. `EXTRA_PUMP=1` settles it: the working async stage, unchanged, plus
-one extra thread pumping events on the same context during the arm. If it drops
-to 0 bytes, more than one pumping thread during the arm is the cause, and the fix
-is in how the library drives its event loop rather than in what it sends to the
-device.
+#### Confirmed: the arm must run with exactly one thread pumping events
+
+`[MEASURED]` `EXTRA_PUMP=1` takes the working async stage, unchanged - same raw
+open, same claim, same four 65536-byte IN requests submitted before any control
+traffic - and adds one second thread calling `libusb_handle_events()` on the same
+context for the duration of the arm:
+
+| pending stage | mono | arm |
+|---|---|---|
+| as before, one pumping thread | 45,940,736 B | 269 ok / 138 fail in 8.36 s |
+| plus one extra pumping thread | 0 B | 269 ok / 138 fail in 8.45 s |
+
+That is the same probe with one variable. It is not a coincidence of four runs any
+more: the working stage was broken by adding a thread, and nothing else changed.
+
+`[MEASURED]` The arm's own shape is unaffected - identical `269 ok / 138 fail`
+counts and near-identical duration in every case - so this is not the device
+rejecting a malformed arm. Control transfers keep working while bulk-IN goes to
+nothing.
+
+`[UNEXPLAINED]` Why. libusb's Windows event loop waits on `WaitForMultipleObjects`
+over a per-context handle array (`os/events_windows.c:167-175`), one handle for the
+internal signalling event and one for the timer, rather than on per-transfer
+objects, so two callers share and consume the same signalling event. That is
+consistent with the observation and is the best candidate, but nothing measured
+here proves it is the mechanism. What is proven is the rule, not the cause.
+
+`[MEASURED]` The rule, and the shape the library now implements: **open -> claim
+-> submit the IN transfers -> arm with no other thread pumping -> start the pump.**
+`meta2_reader_submit_async()` and `meta2_pump_start()` exist to make that ordering
+expressible; `meta2_capture_live` uses it at `queue>1`. The synchronous readers
+used at `queue=1` cannot satisfy it, because a synchronous read pumps events on
+its own thread - which is why `queue=1` has produced zero bytes on Windows in
+every configuration tried.
 
 `[MEASURED]` A separate bug found in the harness while doing this: at `queue>1`
 `meta2_capture_live` handed `bmon`/`brgb`/`bmux` to the async readers as their
