@@ -832,6 +832,53 @@ delivered `mux = 0 B` for the whole window while the cameras kept streaming at
 mono against a 3.33 GB ring. Raised to 20 s, and the tool prints the total
 allocation.
 
+### The `fast` sustain loop is what latches the degraded arm
+
+`[MEASURED]` Replacing enable-then-disable with enable-only at `interval_ms`
+(dropping `fast`) held the arm at the fresh shape on every attempt:
+
+| sustain | re-arm shape | duration |
+|---|---|---|
+| `fast` (assert+deassert as fast as possible) | `137 / 270`, `133 / 274` | 15.2-15.4 s |
+| assert-only every 150 ms | `272 / 135`, `272 / 135`, `272 / 135` | 8.12-8.15 s |
+
+`272 / 135` in 8.15 s is what a freshly replugged device produces on its first
+attempt. Assert-only sustain reproduces it on the third re-arm of the same session.
+
+`[MEASURED]` Every arm failure is `LIBUSB_ERROR_PIPE (-9)`, in both shapes. That is
+consistent with the recorded vendor sequence containing IN transfers that stall on
+purpose (the note at the top of `src/transport.c`), so the failures themselves are
+not the symptom - the count is: 135 in the good shape, 274 in the latched one, out
+of the same 407 transfers.
+
+### EP 0x81 is throttled or silent in every configuration tried so far
+
+`[MEASURED]` With the camera feeds nominally off (`mask=16`), the mux delivered
+43,008 B = 168 records over 25 s = **6.7 records/s**, at 16,974,767 ticks per
+record = 144.1 ms of device time between records. The records were evenly spaced -
+the measured clock was 119.11 MHz against the calibrated 117.82 MHz - so the feed
+was throttled to about 2% of its nominal rate, not stalled.
+
+`[MEASURED]` With assert-only sustain, the mux delivered 1,566,208 B = 6,118
+records in the first 2.00 s (3,059/s) and then **zero for 23 s**. 6,118 records at
+the nominal ~350/s is 17.5 s of buffered mux data - the backlog from the arm,
+flushed at once. Attempts 2 and 3 delivered 364 records in total and then went
+silent.
+
+`[CORRECTED]` The `mask=16` test did not isolate the mux and its camera numbers
+must not be read as "cameras streaming with the feeds off". `meta2_feed_enable`
+sends `{0x00,0x04,0x00,0x00,0x00,enable_mask}` and `mask` only controls the
+sustain asserts; the arm sequence in `arm_capture.txt` arms the feeds
+independently. `0x16` asserts Mono0+Mono1+Mux and RGB (bit 32) was never asserted,
+yet RGB ran at 55.30 MB/s throughout.
+
+`[FIXED]` `resubmit_failed` and `last_submit_error` are now separate counters.
+`async_cb` submits once per completion, so a failed `libusb_submit_transfer()`
+never re-arms that transfer and the endpoint stays silent for the rest of the
+session while others keep streaming - the exact EP 0x81 shape. It had been counted
+into `errors`, which the tool never printed, so `mux = 0 B` with `timeouts = 0`
+read as the device sending nothing.
+
 ### Twenty minutes of idle does not recover the device
 
 `[MEASURED]` The same command, run 20 minutes later with the headset left plugged
