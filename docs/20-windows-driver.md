@@ -832,6 +832,38 @@ delivered `mux = 0 B` for the whole window while the cameras kept streaming at
 mono against a 3.33 GB ring. Raised to 20 s, and the tool prints the total
 allocation.
 
+### The post-window hang is fixed, and the mux throttle is now exact
+
+`[MEASURED]` With the outstanding-transfer gate in place, all three attempts printed
+their verdict. The teardown diagnosis holds.
+
+`[MEASURED]` Attempt 3, full 25 s window:
+
+```
+mono 3,210,215,424 B / 48,984 transfers = 65,536.0 B each
+rgb  2,035,154,944 B / 31,054 transfers = 65,536.0 B each
+mux  1,859,072 B /   7,262 transfers =    256.0 B each
+mux after the burst: 6.8, 6.0, 6.2, 5.8 records/s in successive 5 s beats
+burst: 7,138 records in the first ~2 s, 124 records in the remaining 23 s
+host dropped bytes: total=0
+```
+
+`[MEASURED]` The mux throttle is steady, not decaying: 5.8-6.8 records/s across four
+consecutive beats, against a nominal ~350/s. The cameras held 87.33 / 55.31 MB/s on
+the same beats. Every mux transfer returned exactly one 256-byte record, so the
+device is sending one record per transfer at about 2% of its nominal mux rate.
+
+`[MEASURED]` Attempt 2 showed the two can trade: at `t=15 -> 20` mono fell to
+40.80 MB/s while the mux rose to 12.2 KB/s = 48 records/s.
+
+`[OPEN]` Attempt 1 reported `counters=4276992683` over 866 records - a mux packet
+counter far outside the record count. Not yet explained.
+
+`[ADDED]` `meta2_mux_mask()` sends the mux submask (`0x0009/0x0004`) on its own, and
+`muxtoggle` sustains by asserting the camera feeds and giving only the submask an
+off -> on edge every `interval_ms`. The untested question it asks: does the mux feed
+need an edge to restart, where re-asserting an already-on value is a no-op?
+
 ### The run hung at teardown, and it was a library bug
 
 `[MEASURED]` Two consecutive runs on the real machine printed their final heartbeat
