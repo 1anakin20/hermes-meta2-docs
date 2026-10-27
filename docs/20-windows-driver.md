@@ -832,6 +832,43 @@ delivered `mux = 0 B` for the whole window while the cameras kept streaming at
 mono against a 3.33 GB ring. Raised to 20 s, and the tool prints the total
 allocation.
 
+### The mux streams at ~400 records/s on Windows - and it is bimodal
+
+`[MEASURED]` `muxasync=8 muxhz=100` (paced pipeline, ~97 submask writes/s, `errors=0`):
+
+| attempt | steady mux records/s | mux backlog at `t=5` | arm |
+|---|---|---|---|
+| 1 | 364, 391, 395, 399 (mean **387**) | 3,431 records | 272/135 in 8.19 s |
+| 2 | 28, 28, 25 (mean **27**) | 7,550 records | 273/134 in 8.12 s |
+| 3 | 401, 400, 397, 402 (mean **400**) | 3,585 records | 272/135 in 8.15 s |
+
+`[MEASURED]` Attempt 3 is the best session measured on this machine: **463 mux records/s
+(IMU0 229.4/s, IMU1 233.8/s)** with mono 87.31 MB/s, RGB 55.30 MB/s, `host dropped bytes
+total=0`, mono completeness 99.7%, RGB gaps 99.8% exact, RGB 44.2 complete frames/s.
+
+`[MEASURED]` The same command, the same arm shape, gave 27 records/s in the middle attempt.
+The arm does not predict which state the session lands in. The one thing that does
+correlate: the live runs started with a **small** mux backlog (3,431 and 3,585 records)
+and the stalled run started with a **large** one (7,550).
+
+`[MEASURED]` This is the Linux bimodality of `docs/10` §10.5 - 46.4/46.6 against
+236.6/280.3/375.9 - reproduced on Windows. `[INFERRED]` The mux has two states and the
+configuration does not select between them; something at arm time does.
+
+`[MEASURED]` The write-rate model from the previous section is dead. Records per write in
+these three attempts: 4.3, 0.3, 4.1. Write rate does not explain the mux rate.
+
+`[MEASURED]` The gate rejected all three attempts as `FROZEN`, including attempt 3, which
+delivered 463 records/s. Its `span_clock` of 139.50 MHz against the calibrated 117.82 MHz
+says that session covered 118% of the window. `[OPEN]` the coverage estimator is being
+misled by the backlog burst, which is a gate bug, not a device problem.
+
+### Added: `muxkeep`
+
+The paced pipeline alternates the submask between 0 and the mask, leaving it low half the
+time. `muxkeep` makes every write assert the mask instead. `[OPEN]` whether that deassert
+is what puts the mux into its stalled state.
+
 ### Flooding EP0 makes the mux worse, not better
 
 `[MEASURED]` `muxasync=8` removed the round-trip bound completely: **961 mux-submask
