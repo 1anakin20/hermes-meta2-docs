@@ -832,6 +832,46 @@ delivered `mux = 0 B` for the whole window while the cameras kept streaming at
 mono against a 3.33 GB ring. Raised to 20 s, and the tool prints the total
 allocation.
 
+### The run hung at teardown, and it was a library bug
+
+`[MEASURED]` Two consecutive runs on the real machine printed their final heartbeat
+(`beat t=25.0 s ... mono 87.32 rgb 55.30 MB/s`) and then printed nothing further -
+no `--- queue=8 ---` line, no verdict. Both had to be interrupted.
+
+`[DIAGNOSED]` `meta2_reader_stop()` cancels every outstanding transfer, and a
+cancelled transfer is only released once its callback has run. The pump loop broke
+on `g_pump_stop` alone, so it could exit with the last cancellations undelivered,
+and `meta2_reader_async_destroy()` then called `libusb_free_transfer()` on transfers
+libusb still considered active.
+
+`[FIXED]` `g_outstanding` counts submissions against completions and gates the pump
+exit (`if (g_pump_stop && g_outstanding <= 0) break;`). `meta2_thread_join_timeout()`
+bounds the teardown join at 5 s and prints the outstanding count if it still fails,
+so the failure is legible rather than a silent hang. The reader thread handles are
+now zero-initialised: at `queue>1` they are never started and `capture_live` joined
+them anyway, which on Windows is `WaitForSingleObject` on whatever the stack held.
+
+`[OPEN]` Not verified on Windows from here - the mechanism is clear and the fix is
+targeted at it, but no test in the suite exercised `submit_async` / `pump_start`
+before this, which is exactly why it survived. The next full-arm run is the test:
+if the verdict line appears, the diagnosis holds.
+
+### The mux-only arm produced nothing at all
+
+`[MEASURED]` `arm_mux.txt` (the arm sequence with its one feed assert changed from
+`0x7e` to `0x10`, Mux only) delivered **zero bytes on every endpoint**:
+
+```
+mux (0x81): 0 B = 0.0 records/s
+  mono xfers=0  rgb xfers=0  mux xfers=0   resubmit_failed=0
+```
+
+Sustain was asserting `mask=0x7e` every 150 ms throughout, and nothing streamed.
+Arming the device with the mux feed alone leaves it in a state where re-asserting
+the full mask afterwards does not start anything. `[OPEN]` No conclusion drawn from
+this run beyond the fact that the isolation attempt failed; the arm sequence's
+earlier steps evidently depend on the mask at that point.
+
 ### Correction: warm never ran
 
 `[MEASURED]` `meta2_pump_set_hook()` was installed 19 lines *after* the warm phase.
