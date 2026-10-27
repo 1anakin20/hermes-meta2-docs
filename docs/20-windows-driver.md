@@ -693,6 +693,41 @@ Both are fixed in `meta2lib` as of this commit: `meta2_open()` asks for
 configuration 1 only when the device is not already in it, and the async readers
 share one refcounted event pump.
 
+### The library streams on Windows
+
+`[MEASURED]` `meta2_capture_live` at `queue=8` with the deferred pump produced, on
+the real machine:
+
+```
+mono=694,091,776 B  rgb=437,714,944 B  mux=1,606,656 B
+mono completeness: 950 of 958 = 99.2%
+rgb gaps: exact=235 (99.6%)  long=1   counter +1 steps: 236 of 236 (100.0%)
+mux records=6276  IMU0=3120  IMU1=3153  duplicates: 0 of 6275
+timeouts: mono=0 rgb=0 mux=0
+```
+
+`[MEASURED]` The data is real and internally consistent against the calibrated
+clock. The mux timestamp span of 991,682,463 ticks is 8.417 s of device time at
+117,821,900 ticks/s, and over that span: 475 mono frames per camera = 56.4 fps
+(Linux measures 60), 237 RGB records = 28.2 fps (Linux measures 30), 746 mux
+records/s. 694,091,776 / 721,952 = 961 mono frame records and 437,714,944 /
+1,843,232 = 237.5 RGB frames, so the byte counts and the parsed record counts
+agree.
+
+`[MEASURED]` It then stops. The heartbeats read `mono=694091776 rgb=437714944
+mux=1606656` unchanged at t=5, 10, 15, 20 and 25 s: about 8.4 s of device data
+arrived in the first few seconds and nothing after. `health=FROZEN` with
+`coverage=0.2040` is the gate reporting exactly that, and it is the first time the
+gate has described a Windows session correctly rather than reporting NO_DATA.
+
+`[INFERRED]` The device's stream runs while the arm is in progress, buffers
+internally, and flushes when the host first reads - which is also why the burst
+arrives faster than real time. What it does not do is keep producing with nothing
+re-asserting the feeds. On Linux the sustain loop is what holds a session open, and
+it was the one thing disabled here, because a sustain thread is a second thread
+pumping events. `meta2_pump_set_hook()` runs it on the pump thread instead, which
+keeps the traffic and keeps the one thread.
+
 `[OPEN]` The fix is now a knob, not yet a proven default: `meta2_set_bulk_timeout()`
 and `META2_BULK_TIMEOUT_MS`, default still 1500 because every Linux measurement
 was made at 1500. `rd_ms=10000` has to be measured on the real machine before the
