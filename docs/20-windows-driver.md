@@ -581,10 +581,30 @@ as a real control request to the device - `winusb_set_configuration()` at
 wValue=1`. That request is the remaining difference, and it is the one the library
 was sending and the probe was not.
 
+`[MEASURED]` Confirmed with one variable and one context. `SETCONF=1` adds only
+`libusb_set_configuration(h, 1)` to the raw path - no `meta2_open()`, no second
+libusb context, nothing else different - and it returned `rc=0 (Success)`:
+
+| pending stage | mono | RGB | ToF | mux |
+|---|---|---|---|---|
+| raw open, no SET_CONFIGURATION | 45,940,736 B | 28,573,696 B | 20,840,448 B | 128,768 B |
+| raw open + `SET_CONFIGURATION` (rc=0) | 0 B | 0 B | 0 B | 0 B |
+
+The request succeeds and the stream dies. Same arm shape (`272 ok / 135 fail in
+8.18 s`), same SuperSpeed link, same URBs. This is measured, not inferred.
+
 `[INFERRED]` Why it is fatal: SET_CONFIGURATION resets endpoint state, and the
 device then never starts producing. Why the same call is harmless on Linux is not
 measured - on Linux the request goes through the kernel rather than over the wire
 from libusb.
+
+`[MEASURED]` Removing it from `meta2_open()` did not by itself make
+`meta2_capture_live` produce data: `25 1 150 65536 nosustain rd_ms=10000` still
+gave `health=NO_DATA`, 0 bytes, timeouts 10/10/10 then 4/4/4. So a startup
+difference is still live. The remaining one in the open path is
+`meta2_reset(); close; 2 s; reopen`, which on Windows is only
+AbortPipe/FlushPipe/ResetPipe (20.8). `noreset` skips it; `RAWRESET=1` in the
+probe isolates it with no SET_CONFIGURATION and no library open path.
 
 `[MEASURED]` A second, separate Windows bug: at `queue=8` the run printed the arm
 and then nothing at all - the process died silently, the same failure as the

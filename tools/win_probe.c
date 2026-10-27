@@ -180,6 +180,16 @@ static void pending_stage(libusb_context *ctx, int seconds, int sz)
             printf("  SET_CONFIGURATION added, nothing else changed: rc=%d (%s)\n",
                    sc, libusb_strerror(sc));
         }
+        if (flag("RAWRESET")) {          /* the reset cycle alone, nothing else */
+            int rr = libusb_reset_device(h);
+            printf("  raw reset: %d (%s)\n", rr, libusb_strerror(rr));
+            libusb_release_interface(h, 0);
+            libusb_close(h);
+            meta2_sleep_us(2000000);
+            h = libusb_open_device_with_vid_pid(ctx, 0x2cfa, 0x00f3);
+            if (!h) { printf("  raw reopen failed\n"); return; }
+            printf("  raw reopened\n");
+        }
         printf("  claim: %d (%s)\n", libusb_claim_interface(h, 0),
                libusb_strerror(libusb_claim_interface(h, 0)));
     }
