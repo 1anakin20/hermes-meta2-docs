@@ -604,7 +604,30 @@ gave `health=NO_DATA`, 0 bytes, timeouts 10/10/10 then 4/4/4. So a startup
 difference is still live. The remaining one in the open path is
 `meta2_reset(); close; 2 s; reopen`, which on Windows is only
 AbortPipe/FlushPipe/ResetPipe (20.8). `noreset` skips it; `RAWRESET=1` in the
-probe isolates it with no SET_CONFIGURATION and no library open path.
+probe isolates it with no SET_CONFIGURATION and no library open path. It is fatal
+on its own: raw open, `libusb_reset_device()` returning `0 (Success)`, close, 2 s,
+reopen, then the identical pending stage - 0 B on all four endpoints.
+
+So two independent operations each kill the stream, both measured with one
+variable changed: `libusb_set_configuration()` and `libusb_reset_device()`. The
+working sequence is exactly `open -> claim -> submit INs -> arm`, with nothing
+between claim and submit.
+
+`[MEASURED]` `noreset` did not make `meta2_capture_live` produce data either
+(`25 1 150 65536 nosustain noreset rd_ms=10000`: `health=NO_DATA`, 0 bytes,
+timeouts 4/4/4 on both attempts). With SET_CONFIGURATION and the reset both
+removed, the library's open path now matches the probe's, and the only remaining
+difference is reader shape: synchronous bulk reads on one thread per endpoint
+versus asynchronous transfers pumped by one thread. `SYNCREAD=1` in the probe
+applies the library's reader shape to the open path that already delivers 45 MB,
+which decides it.
+
+`[MEASURED]` A separate bug found in the harness while doing this: at `queue>1`
+`meta2_capture_live` handed `bmon`/`brgb`/`bmux` to the async readers as their
+rings and then drained them, which memmoved each reader's unread tail to the
+front of the same buffer and wrote the drained copy back over it. Two writers in
+one buffer. `queue=1` never reached it because no bytes arrived; `queue=8` died
+silently, which is what that looked like.
 
 `[MEASURED]` A second, separate Windows bug: at `queue=8` the run printed the arm
 and then nothing at all - the process died silently, the same failure as the

@@ -151,6 +151,65 @@ static void LIBUSB_CALL pend_cb(struct libusb_transfer *t)
    winusb_set_configuration() at windows_winusb.c:2126). The raw path never does.
    LIB_RESET=1 - then do the reset + close + 2 s + reopen cycle that
    meta2_capture_live does at its start. */
+/* SYNCREAD=1 - the library's queue=1 shape, on the open path that already
+   delivers 45 MB: raw open, claim, synchronous bulk reads on one thread per
+   endpoint with a 10000 ms timeout, arm on the main thread. If this returns 0
+   bytes where the async pending stage returns 45 MB, the reader shape is the
+   blocker and nothing else is. */
+static libusb_device_handle *g_sync_h;
+struct syncst { unsigned char *buf; int ep; long long bytes;
+                int timeouts, reads, errors; volatile int stop; };
+static struct syncst S[4];
+
+static void *sync_loop(void *argp)
+{
+    struct syncst *s = (struct syncst *)argp;
+    while (!s->stop) {
+        int got = 0;
+        int rc = libusb_bulk_transfer(g_sync_h, (unsigned char)s->ep, s->buf,
+                                      65536, &got, 10000);
+        if (rc == 0) { s->reads++; s->bytes += got; }
+        else if (rc == LIBUSB_ERROR_TIMEOUT) s->timeouts++;
+        else s->errors++;
+    }
+    return NULL;
+}
+
+static void sync_stage(libusb_context *ctx, int seconds)
+{
+    g_sync_h = libusb_open_device_with_vid_pid(ctx, 0x2cfa, 0x00f3);
+    if (!g_sync_h) { printf("  sync stage: open failed\n"); return; }
+    printf("  claim: %d (%s)\n", libusb_claim_interface(g_sync_h, 0),
+           libusb_strerror(libusb_claim_interface(g_sync_h, 0)));
+    static const int eps[4] = { 0x81, 0x82, 0x83, 0x84 };
+    meta2_thread_t th[4];
+    for (int i = 0; i < 4; i++) {
+        memset(&S[i], 0, sizeof S[i]);
+        memset(&th[i], 0, sizeof th[i]);
+        S[i].buf = malloc(65536); S[i].ep = eps[i];
+        if (!S[i].buf) { printf("  sync stage: out of memory\n"); return; }
+        if (meta2_thread_start(&th[i], sync_loop, &S[i]))
+            printf("  reader thread %d failed to start\n", i);
+    }
+    printf("  started 4 sync readers (65536 B, 10000 ms) BEFORE any control traffic\n");
+    int ok = 0, fail = 0;
+    double t0 = meta2_time_us() / 1000000.0;
+    run_arm(g_sync_h, &ok, &fail);
+    printf("  arm (with sync reads pending) ok=%d fail=%d (%.2f s)\n",
+           ok, fail, meta2_time_us() / 1000000.0 - t0);
+    meta2_sleep_us((uint32_t)seconds * 1000000u);
+    for (int i = 0; i < 4; i++) S[i].stop = 1;
+    for (int i = 0; i < 4; i++) meta2_thread_join(&th[i]);
+    for (int i = 0; i < 4; i++) {
+        printf("  sync EP 0x%02x: %lld B reads=%d timeouts=%d errs=%d first_data=%s\n",
+               eps[i], S[i].bytes, S[i].reads, S[i].timeouts, S[i].errors,
+               S[i].bytes > 0 ? "yes" : "none");
+        free(S[i].buf);
+    }
+    libusb_close(g_sync_h);
+    g_sync_h = NULL;
+}
+
 static void pending_stage(libusb_context *ctx, int seconds, int sz)
 {
     libusb_context *ec = ctx;
@@ -250,6 +309,12 @@ int main(void)
        after several arms and several successful reads, so its result could be
        hysteresis from the earlier stages rather than a startup property. */
     if (flag("ONLY_PENDING")) {
+        if (flag("SYNCREAD")) {
+            printf("ONLY_PENDING + SYNCREAD: sync readers on 4 threads, nothing before it\n");
+            sync_stage(ctx, 20);
+            libusb_exit(ctx);
+            return 0;
+        }
         printf("ONLY_PENDING: straight to pending-before-arm, nothing before it\n");
         pending_stage(ctx, 20, 65536);
         libusb_exit(ctx);
