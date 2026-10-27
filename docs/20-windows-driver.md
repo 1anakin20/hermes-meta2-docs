@@ -464,8 +464,52 @@ on its first attempt and `403 / 4` on every later one, with zero bytes - the
 starved shape, and the same five times in a row, because the gate's reset is a
 no-op (20.8).
 
-`[OPEN]` What is left, now that speed, descriptors, claim, control and arm all
-match Linux: how the host services bulk-IN. A Linux xHCI keeps one blocking bulk
+#### Bulk-IN works on real Windows 11 - the transport is not the blocker
+
+`[MEASURED]` A later `win_probe` run on the same SuperSpeed port:
+
+```
+pre-arm  EP 0x81 size=1024: rc=-7 bytes=0 waited=3004 of 3000 ms   (all four eps)
+arm ok=272 fail=135 (8.21 s)
+post-arm EP 0x81 size=1024: rc=0  bytes=256  waited=0 of 3000 ms
+post-arm EP 0x82 size=1024: rc=0  bytes=1024 waited=0
+post-arm EP 0x83 size=1024: rc=0  bytes=1024 waited=0
+post-arm EP 0x84 size=1024: rc=0  bytes=1024 waited=0
+sustained EP 0x81 size=4096: 0.00 MB/s reads=3  timeouts=5
+sustained EP 0x82 size=4096: 0.00 MB/s reads=3  timeouts=5
+sustained EP 0x83 size=4096: 0.01 MB/s reads=15 timeouts=5
+sustained EP 0x84 size=4096: 0.01 MB/s reads=15 timeouts=5
+pending-before-arm, 65536 B URBs, all four endpoints: 0 B, first_data=none
+```
+
+`[MEASURED]` So WinUSB on this machine does deliver bulk-IN data, immediately
+(`waited=0`), on all four endpoints, right after the arm. The earlier "Windows
+bulk transport does not work" reading is dead.
+
+`[MEASURED]` It is a trickle, not a stream: 0.01 MB/s against the 55 MB/s an RGB
+endpoint emits in a healthy session. The device is in a starved state, not a
+healthy one.
+
+`[MEASURED]` `waited=3004 of 3000 ms` on every failure: libusb's own timeout is
+what ends these reads. No shorter host-side timeout is firing, so the HCTimeout
+idea is dead as an explanation.
+
+`[MEASURED]` Requests already outstanding when the arm lands receive nothing
+(`first_data=none`), while a request issued after the arm receives data at once.
+That is the opposite of the Linux recipe, which requires readers pending before
+the arm.
+
+`[OPEN]` Two variables separate the working probe from the failing library, and
+they have not yet been separated from each other:
+
+| | pending before arm | 65536-byte URB |
+|---|---|---|
+| probe post-arm | no | **never tested** - the loop stops at the first success |
+| probe pending stage | yes | yes → 0 B |
+| `meta2_capture_live` / `meta2_stream_demo` | yes | yes → 0 B |
+
+`win_probe` now tests the two empty cells: post-arm with a 65536-byte URB alone,
+and pending-before-arm with 1024-byte URBs. A Linux xHCI keeps one blocking bulk
 URB pending indefinitely, so the endpoint sees continuous IN tokens; WinUSB
 aborts each read. `win_probe` now measures this two ways - the elapsed time each
 bulk attempt actually waited against the 3000 ms it asked for, and a final stage

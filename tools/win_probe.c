@@ -59,11 +59,11 @@ static void list_candidates(libusb_context *ctx)
     if (!found) printf("  no 2cfa:00f3 node found at all\n");
 }
 
-static void bulk_try(libusb_device_handle *h, const char *stage)
+static void bulk_try_sizes(libusb_device_handle *h, const char *stage,
+                           const int *SIZES, int nsz)
 {
-    static const int SIZES[] = { 1024, 65536 };
     for (unsigned i = 0; i < sizeof(EPS)/sizeof(EPS[0]); i++) {
-        for (unsigned s = 0; s < sizeof(SIZES)/sizeof(SIZES[0]); s++) {
+        for (int s = 0; s < nsz; s++) {
             int sz = SIZES[s];
             unsigned char *b = malloc((size_t)sz);
             int got = 0, rc = LIBUSB_ERROR_OTHER;
@@ -76,6 +76,12 @@ static void bulk_try(libusb_device_handle *h, const char *stage)
             if (got > 0) break;
         }
     }
+}
+
+static void bulk_try(libusb_device_handle *h, const char *stage)
+{
+    static const int SIZES[] = { 1024, 65536 };
+    bulk_try_sizes(h, stage, SIZES, 2);
 }
 
 /* The arm, read the way meta2_capture_live reads arm_capture.txt:
@@ -134,7 +140,7 @@ static void LIBUSB_CALL pend_cb(struct libusb_transfer *t)
     if (!pend_stop) { if (libusb_submit_transfer(t) != 0) p->timeouts++; }  /* keep IN queued */
 }
 
-static void pending_stage(libusb_context *ctx, int seconds)
+static void pending_stage(libusb_context *ctx, int seconds, int sz)
 {
     libusb_device_handle *h = libusb_open_device_with_vid_pid(ctx, 0x2cfa, 0x00f3);
     if (!h) { printf("  pending stage: open failed\n"); return; }
@@ -144,9 +150,9 @@ static void pending_stage(libusb_context *ctx, int seconds)
     for (unsigned i = 0; i < 4; i++) {
         P[i].ep = EPS[i];
         P[i].bytes = 0; P[i].completions = 0; P[i].timeouts = 0; P[i].first_ms = -1;
-        P[i].buf = malloc(65536);
+        P[i].buf = malloc((size_t)sz);
         P[i].t = libusb_alloc_transfer(0);
-        libusb_fill_bulk_transfer(P[i].t, h, (unsigned char)EPS[i], P[i].buf, 65536,
+        libusb_fill_bulk_transfer(P[i].t, h, (unsigned char)EPS[i], P[i].buf, sz,
                                   pend_cb, &P[i], 10000);   /* outlast the 8 s arm */
     }
     double t0 = meta2_time_us();
@@ -252,6 +258,12 @@ int main(void)
     printf("bulk after arm:\n");
     bulk_try(h, "post-arm");
 
+    /* The loop above stops at the first success, so a 65536-byte URB has never
+       been tried after an arm on Windows. The library reads 65536. Try it alone. */
+    printf("bulk after arm, 65536-byte URB only:\n");
+    static const int BIG[] = { 65536 };
+    bulk_try_sizes(h, "post-big", BIG, 1);
+
     /* Stage 3: sustained, one endpoint at a time. Distinguishes "never any
        data" from "data but not enough". */
     for (unsigned i = 0; i < sizeof(EPS)/sizeof(EPS[0]); i++) {
@@ -315,9 +327,13 @@ int main(void)
     /* Stage 6: the Linux recipe, on a clean handle, with IN requests kept
        continuously outstanding. Run last so no earlier stage's aborts are in
        the way. */
-    printf("--- pending-before-arm stage (the Linux recipe)\n");
+    printf("--- pending-before-arm, 65536-byte URBs (what the library does)\n");
     meta2_sleep_us(1500000);
-    pending_stage(ctx, 12);
+    pending_stage(ctx, 12, 65536);
+
+    printf("--- pending-before-arm, 1024-byte URBs (the size that just worked)\n");
+    meta2_sleep_us(1500000);
+    pending_stage(ctx, 12, 1024);
 
     libusb_exit(ctx);
     return 0;
