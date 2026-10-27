@@ -527,6 +527,37 @@ with the same handle, same endpoints, same arm.
 still produced zero bytes with 18 timeouts per endpoint - so URB size alone is
 not the answer, and the timeout is the remaining difference.
 
+#### The 7.7 s startup is real, and warm/sustain and 0x84 are ruled out
+
+`[MEASURED]` `ONLY_PENDING=1` runs the pending stage in a fresh process with
+nothing before it. Reproduced, near-identically, against the earlier run:
+
+| endpoint | fresh process | earlier run | first byte |
+|---|---|---|---|
+| `0x81` mux | 128,768 B / 506 | 126,976 B / 498 | 1 ms |
+| `0x82` mono | 45,940,736 B / 704 | 44,957,696 B / 688 | 7716 ms |
+| `0x83` RGB | 28,573,696 B / 439 | 29,360,128 B / 450 | 7713 ms |
+| `0x84` ToF | 20,840,448 B / 321 | 20,447,232 B / 314 | 7653 ms |
+
+`[MEASURED]` So the ~7.7 s first-byte latency is a startup property, not
+hysteresis left by earlier stages. It reproduced within 63 ms across processes.
+
+`[MEASURED]` Ruled out as the reason the library fails, each by a run that still
+produced zero bytes: the 4 s warm assert, the sustain loop (`nosustain`), whether
+`0x84` is serviced (`tof`), URB size (1024 and 65536), and the bulk timeout
+(`rd_ms=10000`, visible as timeouts falling from 18 to 4 per endpoint).
+
+`[MEASURED]` Two differences between the working probe and the failing library
+are left. `meta2_open()` calls `libusb_set_configuration(h, 1)`, and libusb's
+Windows backend implements that as a real control request to the device -
+`winusb_set_configuration()` at `windows_winusb.c:2126` sends
+`OUT | STANDARD | DEVICE, SET_CONFIGURATION, wValue=config` with a 1000 ms
+timeout. The probe never sends it. And `meta2_capture_live` additionally does
+`meta2_reset(); meta2_close(); sleep 2 s; meta2_open()` at its start, which on
+Windows is the AbortPipe/FlushPipe/ResetPipe sequence of 20.8. The second
+remaining difference is reader shape: the probe uses async transfers pumped by one
+thread, the library at `queue=1` uses synchronous reads on three or four threads.
+
 `[OPEN]` The fix is now a knob, not yet a proven default: `meta2_set_bulk_timeout()`
 and `META2_BULK_TIMEOUT_MS`, default still 1500 because every Linux measurement
 was made at 1500. `rd_ms=10000` has to be measured on the real machine before the

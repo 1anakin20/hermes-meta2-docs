@@ -140,12 +140,38 @@ static void LIBUSB_CALL pend_cb(struct libusb_transfer *t)
     if (!pend_stop) { if (libusb_submit_transfer(t) != 0) p->timeouts++; }  /* keep IN queued */
 }
 
+/* LIB_OPEN=1  - open the way meta2lib does: meta2_open(), which on Windows sends
+   a real SET_CONFIGURATION control request to the device (libusb's
+   winusb_set_configuration() at windows_winusb.c:2126). The raw path never does.
+   LIB_RESET=1 - then do the reset + close + 2 s + reopen cycle that
+   meta2_capture_live does at its start. */
 static void pending_stage(libusb_context *ctx, int seconds, int sz)
 {
-    libusb_device_handle *h = libusb_open_device_with_vid_pid(ctx, 0x2cfa, 0x00f3);
-    if (!h) { printf("  pending stage: open failed\n"); return; }
-    printf("  claim: %d (%s)\n", libusb_claim_interface(h, 0),
-           libusb_strerror(libusb_claim_interface(h, 0)));
+    libusb_context *ec = ctx;
+    libusb_device_handle *h;
+    if (getenv("LIB_OPEN")) {
+        void *hh = NULL;
+        int orc = meta2_open(&hh);
+        if (orc) { printf("  meta2_open failed: %d\n", orc); return; }
+        h = (libusb_device_handle *)hh;
+        ec = (libusb_context *)meta2_context();
+        printf("  meta2_open ok (SET_CONFIGURATION sent); events on meta2 context\n");
+        if (getenv("LIB_RESET")) {
+            printf("  meta2_reset: %d (%s)\n", meta2_reset(h),
+                   libusb_strerror(meta2_reset(h)));
+            meta2_close(h);
+            meta2_sleep_us(2000000);
+            if (meta2_open(&hh)) { printf("  reopen failed\n"); return; }
+            h = (libusb_device_handle *)hh;
+            ec = (libusb_context *)meta2_context();
+            printf("  reopened\n");
+        }
+    } else {
+        h = libusb_open_device_with_vid_pid(ctx, 0x2cfa, 0x00f3);
+        if (!h) { printf("  pending stage: open failed\n"); return; }
+        printf("  claim: %d (%s)\n", libusb_claim_interface(h, 0),
+               libusb_strerror(libusb_claim_interface(h, 0)));
+    }
 
     for (unsigned i = 0; i < 4; i++) {
         P[i].ep = EPS[i];
@@ -169,13 +195,13 @@ static void pending_stage(libusb_context *ctx, int seconds, int sz)
     double end = meta2_time_us() + seconds * 1000000.0;
     while (meta2_time_us() < end) {
         struct timeval tv = { 0, 100000 };
-        libusb_handle_events_timeout_completed(ctx, &tv, NULL);
+        libusb_handle_events_timeout_completed(ec, &tv, NULL);
     }
     pend_stop = 1;
     for (int i = 0; i < 4; i++) {
         libusb_cancel_transfer(P[i].t);
         struct timeval tv = { 0, 200000 };
-        libusb_handle_events_timeout_completed(ctx, &tv, NULL);
+        libusb_handle_events_timeout_completed(ec, &tv, NULL);
     }
     for (int i = 0; i < 4; i++) {
         printf("  pending EP 0x%02x: %lld B completions=%d timeouts=%d first_data=%s\n",
