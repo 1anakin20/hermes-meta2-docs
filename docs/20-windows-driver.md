@@ -728,6 +728,48 @@ it was the one thing disabled here, because a sustain thread is a second thread
 pumping events. `meta2_pump_set_hook()` runs it on the pump thread instead, which
 keeps the traffic and keeps the one thread.
 
+### Sustain on the pump thread holds the session open
+
+`[MEASURED]` `warm=7e fast` with the sustain traffic issued from inside the pump
+thread (`meta2_pump_set_hook`) ran the full window and passed the gate for the
+first time on Windows:
+
+```
+probe 2.00 s -> health=OK  coverage=1.3826  records=3121 (1560/s)
+beat t=5   mono=904,069,120  rgb=571,408,384   mux=1,013,760
+beat t=10  mono=1,340,669,952 rgb=847,904,768  mux=1,296,640
+beat t=15  mono=1,468,006,400 rgb=1,124,401,152 mux=1,638,912
+window health: health=OK  coverage=1.1091  records=8725
+mono completeness: 2014 of 2018 = 99.8%   rgb gaps: exact=794 (99.9%)
+mux duplicates: 0 of 8724   counter +1 in 8716 steps
+```
+
+The byte counts climb at every heartbeat instead of freezing, which is the
+difference from the previous section. The mux timestamp span of 3,332,525,549
+ticks is 28.28 s of device time inside a 25.00 s host window - the session runs
+slightly ahead of real time, which is the arm backlog being flushed, and
+`coverage=1.1091` is the gate measuring exactly that.
+
+`[MEASURED]` Warm matters: without it, the same command produced
+`coverage=0.7536` and the gate rejected the session.
+
+### The next limit is the host's ring, not the device
+
+`[MEASURED]` Both rings read exactly `1,468,006,400 B` - the 1400 MB cap - and the
+run dropped bytes: 1,181,286,400 mono and 209,321,984 RGB. Against that cap the
+device produced 2.65 GB of mono and 1.68 GB of RGB in 25 s. A fixed 1400 MB ring
+was sized for one camera over 25 s, not for the mono pair (2 x 721,952 B at 60 fps
+= 86.6 MB/s) plus the backlog.
+
+`[MEASURED]` The tool's own dropped-bytes line was part of the confusion: it
+printed the sum of all three readers under the label `mono`, so `mono=1,390,608,384`
+read as one endpoint dropping 1.39 GB. Fixed to report each reader separately.
+
+`[FIXED]` Rings are now computed from the window - `(seconds + 12 s backlog
+allowance)` at the measured rates, 3.33 GB mono and 2.22 GB RGB for a 25 s window -
+with `cap_mb=N` to override. A run that drops now prints the size that would have
+held it.
+
 `[OPEN]` The fix is now a knob, not yet a proven default: `meta2_set_bulk_timeout()`
 and `META2_BULK_TIMEOUT_MS`, default still 1500 because every Linux measurement
 was made at 1500. `rd_ms=10000` has to be measured on the real machine before the
