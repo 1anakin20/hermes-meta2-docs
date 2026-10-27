@@ -438,15 +438,55 @@ SuperSpeed port on that machine, nothing about `meta2lib`'s Windows bulk path ca
 be evaluated, and the port-reset finding in 20.8 is not yet the binding
 constraint.
 
+### 20.9.1 Corrected the same day: SuperSpeed was necessary, not sufficient
+
+`[MEASURED]` The headset was moved to a SuperSpeed port and `win_probe` re-run:
+
+```
+opened: bus 2 address 32 speed SUPER 5 Gb/s
+bcdUSB 0300
+  ep 81..84 attr 02 maxpacket 1024 (burst 0)
+claim_interface 0: 0        vendor control read: rc=1
+arm ok=272 fail=135 (8.16 s)
+```
+
+The descriptors now match Linux exactly, and the arm is the fresh Linux shape -
+`272 ok / 135 fail`, against Linux's `272 / 135 in 8.5 s`. Bulk-IN still returns
+zero bytes on all four endpoints, at every stage: before arm, after arm, sustained
+4 KiB loop, after reset, and after close + reopen + re-arm. All `rc=-7` timeouts.
+
+`[MEASURED]` So the USB 2 link was a real defect and it is fixed, but it was not
+the cause of the no-data condition. The claim in 20.9 that this "supersedes the
+transport question" was wrong, and is withdrawn.
+
+`[MEASURED]` `meta2_stream_demo.exe` on the SuperSpeed port arms `400 ok / 7 fail`
+on its first attempt and `403 / 4` on every later one, with zero bytes - the
+starved shape, and the same five times in a row, because the gate's reset is a
+no-op (20.8).
+
+`[OPEN]` What is left, now that speed, descriptors, claim, control and arm all
+match Linux: how the host services bulk-IN. A Linux xHCI keeps one blocking bulk
+URB pending indefinitely, so the endpoint sees continuous IN tokens; WinUSB
+aborts each read. `win_probe` now measures this two ways - the elapsed time each
+bulk attempt actually waited against the 3000 ms it asked for, and a final stage
+that reproduces the Linux recipe at raw libusb level (IN requests outstanding on
+all four endpoints before any control traffic, resubmitted on every completion,
+10 s per transfer so a single URB outlasts the 8 s arm).
+
+`[OPEN]` An unexplained descriptor difference seen in passing: the probe reports
+`MaxPower 8 mA` at SuperSpeed and `50 mA` at High Speed, while docs/01 and docs/02
+record `MaxPower 64 mA` from Linux. Not known to be causal; recorded because it
+is a place where Windows' and Linux's view of the same device differ.
+
 ---
 
 ## 20.10 Open items
 
-1. **Get the headset onto a SuperSpeed port on the Windows 11 machine.** This is
-   now the binding constraint (20.9), and it is physical, not software. The
-   machine's own vendor diagnostics reported USB 2.0 back in docs/12 §12.29, and
-   `win_probe` confirms HIGH 480 Mb/s / maxpacket 512 from libusb. Until that
-   changes, no conclusion about `meta2lib`'s Windows bulk path is available.
+1. **Why bulk-IN never produces on Windows when speed, descriptors, claim,
+   control and arm all match Linux** (20.9.1). SuperSpeed was a real defect and is
+   fixed; it was not the cause. The remaining candidate is how the host services
+   bulk-IN - continuous pending URBs on Linux versus an aborted read per attempt
+   on Windows.
 2. Get the device back to its post-connect state on Windows. The gate's recovery
    step is a no-op under WinUSB (20.8). This is real and will bite as soon as the
    link is SuperSpeed, but it is not yet the thing being tested.
