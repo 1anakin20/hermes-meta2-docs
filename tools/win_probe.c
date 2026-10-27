@@ -210,6 +210,22 @@ static void sync_stage(libusb_context *ctx, int seconds)
     g_sync_h = NULL;
 }
 
+/* EXTRA_PUMP=1 - the async stage that delivers 45 MB, plus one more thread
+   calling libusb_handle_events() on the same context during the arm. Nothing
+   else changes. This is the one variable that separates every working run from
+   every failing one so far: the probe arms with exactly one thread pumping
+   events and gets 45 MB, and the library arms with two or more and gets none. */
+static volatile int g_xp_stop;
+static libusb_context *g_xp_ctx;
+static void *extra_pump(void *argp) {
+    (void)argp;
+    while (!g_xp_stop) {
+        struct timeval tv = {0, 20000};
+        libusb_handle_events_timeout_completed(g_xp_ctx, &tv, NULL);
+    }
+    return NULL;
+}
+
 static void pending_stage(libusb_context *ctx, int seconds, int sz)
 {
     libusb_context *ec = ctx;
@@ -266,6 +282,14 @@ static void pending_stage(libusb_context *ctx, int seconds, int sz)
     int submitted = 0;
     for (int i = 0; i < 4; i++) if (libusb_submit_transfer(P[i].t) == 0) submitted++;
     printf("  submitted %d of 4 IN requests BEFORE any control traffic\n", submitted);
+    meta2_thread_t xp; memset(&xp, 0, sizeof xp);
+    if (flag("EXTRA_PUMP")) {
+        g_xp_stop = 0; g_xp_ctx = ec;
+        if (meta2_thread_start(&xp, extra_pump, NULL))
+            printf("  EXTRA_PUMP: thread failed to start\n");
+        else
+            printf("  EXTRA_PUMP: a SECOND thread is pumping events on this context during the arm\n");
+    }
 
     int ok = 0, fail = 0;
     run_arm(h, &ok, &fail);
@@ -280,9 +304,10 @@ static void pending_stage(libusb_context *ctx, int seconds, int sz)
     pend_stop = 1;
     for (int i = 0; i < 4; i++) {
         libusb_cancel_transfer(P[i].t);
-        struct timeval tv = { 0, 200000 };
+        struct timeval tv = {0, 200000};
         libusb_handle_events_timeout_completed(ec, &tv, NULL);
     }
+    if (flag("EXTRA_PUMP")) { g_xp_stop = 1; meta2_thread_join(&xp); }
     for (int i = 0; i < 4; i++) {
         printf("  pending EP 0x%02x: %lld B completions=%d timeouts=%d first_data=%s\n",
                P[i].ep, P[i].bytes, P[i].completions, P[i].timeouts,

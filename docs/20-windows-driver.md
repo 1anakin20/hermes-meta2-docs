@@ -620,7 +620,31 @@ removed, the library's open path now matches the probe's, and the only remaining
 difference is reader shape: synchronous bulk reads on one thread per endpoint
 versus asynchronous transfers pumped by one thread. `SYNCREAD=1` in the probe
 applies the library's reader shape to the open path that already delivers 45 MB,
-which decides it.
+and it decides it: 0 bytes.
+
+`[MEASURED]` `ONLY_PENDING` + `SYNCREAD` - raw open, claim, four synchronous
+65536-byte bulk reads with a 10000 ms timeout started before any control traffic,
+arm on the main thread - gave `reads=0 timeouts=3` on every endpoint. Three full
+10-second timeouts each, so the requests really were outstanding for the whole
+window, and nothing arrived. The same open path with asynchronous transfers gives
+45 MB.
+
+`[MEASURED]` The pattern across every run so far, sorted by how many threads are
+calling `libusb_handle_events()` while the arm runs:
+
+| run | pumping threads during the arm | result |
+|---|---|---|
+| probe, async pending stage | 1 (the main thread) | 45 MB |
+| probe, `SYNCREAD` | 4 (one per reader) | 0 B |
+| library, `queue=1` | 4 (3 readers + main) | 0 B |
+| library, `queue=8` | 2 (1 pump + main) | 0 B |
+
+`[OPEN]` Whether that is the mechanism or a coincidence of these four runs is not
+yet settled. `EXTRA_PUMP=1` settles it: the working async stage, unchanged, plus
+one extra thread pumping events on the same context during the arm. If it drops
+to 0 bytes, more than one pumping thread during the arm is the cause, and the fix
+is in how the library drives its event loop rather than in what it sends to the
+device.
 
 `[MEASURED]` A separate bug found in the harness while doing this: at `queue>1`
 `meta2_capture_live` handed `bmon`/`brgb`/`bmux` to the async readers as their
