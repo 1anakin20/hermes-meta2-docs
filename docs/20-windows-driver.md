@@ -558,6 +558,46 @@ Windows is the AbortPipe/FlushPipe/ResetPipe sequence of 20.8. The second
 remaining difference is reader shape: the probe uses async transfers pumped by one
 thread, the library at `queue=1` uses synchronous reads on three or four threads.
 
+#### The open path is what killed it
+
+`[MEASURED]` `LIB_OPEN=1` makes the probe open the device the way `meta2_open()`
+does and changes nothing else - same pending URBs submitted before any control
+traffic, same arm (`269 ok / 138 fail in 8.35 s`), same four endpoints, same
+65536-byte URBs, same 10000 ms timeout, same SuperSpeed link at address 59:
+
+| open path | mono | RGB | ToF | mux |
+|---|---|---|---|---|
+| raw `libusb_open` + `claim_interface` | 45,940,736 B | 28,573,696 B | 20,840,448 B | 128,768 B |
+| `meta2_open()` | 0 B | 0 B | 0 B | 0 B |
+
+`[MEASURED]` Adding `meta2_reset(); close; 2 s; reopen` on top changed nothing
+further - it was already broken by the open alone.
+
+`[MEASURED]` `meta2_open()` differs from the raw path by exactly two calls:
+`libusb_detach_kernel_driver()` (a no-op on Windows) and
+`libusb_set_configuration(h, 1)`. libusb's Windows backend implements the second
+as a real control request to the device - `winusb_set_configuration()` at
+`windows_winusb.c:2126` sends `OUT | STANDARD | DEVICE, SET_CONFIGURATION,
+wValue=1`. That request is the remaining difference, and it is the one the library
+was sending and the probe was not.
+
+`[INFERRED]` Why it is fatal: SET_CONFIGURATION resets endpoint state, and the
+device then never starts producing. Why the same call is harmless on Linux is not
+measured - on Linux the request goes through the kernel rather than over the wire
+from libusb.
+
+`[MEASURED]` A second, separate Windows bug: at `queue=8` the run printed the arm
+and then nothing at all - the process died silently, the same failure as the
+`0xC0000005` access violation seen at queue=8 in the VM. Cause in source: every
+async reader started its own `libusb_handle_events()` thread on the one shared
+context, and libusb delivers a completion to whichever thread is pumping rather
+than to the thread that submitted, so one reader's pump could run another
+reader's callback after its state had been freed.
+
+Both are fixed in `meta2lib` as of this commit: `meta2_open()` asks for
+configuration 1 only when the device is not already in it, and the async readers
+share one refcounted event pump.
+
 `[OPEN]` The fix is now a knob, not yet a proven default: `meta2_set_bulk_timeout()`
 and `META2_BULK_TIMEOUT_MS`, default still 1500 because every Linux measurement
 was made at 1500. `rd_ms=10000` has to be measured on the real machine before the

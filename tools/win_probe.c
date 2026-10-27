@@ -88,6 +88,12 @@ static void bulk_try(libusb_device_handle *h, const char *stage)
      O <wValue> <wIndex> <hex payload>
      I <wValue> <in_len>                (wIndex fixed to 1)
    Returns -1 if the command file is missing. */
+/* An empty value means unset: PowerShell can leave a variable set to "". */
+static int flag(const char *name) {
+    const char *v = getenv(name);
+    return v && *v;
+}
+
 static int run_arm(libusb_device_handle *h, int *ok_out, int *fail_out)
 {
     FILE *f = fopen("arm_capture.txt", "rb");
@@ -149,14 +155,14 @@ static void pending_stage(libusb_context *ctx, int seconds, int sz)
 {
     libusb_context *ec = ctx;
     libusb_device_handle *h;
-    if (getenv("LIB_OPEN")) {
+    if (flag("LIB_OPEN")) {
         void *hh = NULL;
         int orc = meta2_open(&hh);
         if (orc) { printf("  meta2_open failed: %d\n", orc); return; }
         h = (libusb_device_handle *)hh;
         ec = (libusb_context *)meta2_context();
         printf("  meta2_open ok (SET_CONFIGURATION sent); events on meta2 context\n");
-        if (getenv("LIB_RESET")) {
+        if (flag("LIB_RESET")) {
             printf("  meta2_reset: %d (%s)\n", meta2_reset(h),
                    libusb_strerror(meta2_reset(h)));
             meta2_close(h);
@@ -169,6 +175,11 @@ static void pending_stage(libusb_context *ctx, int seconds, int sz)
     } else {
         h = libusb_open_device_with_vid_pid(ctx, 0x2cfa, 0x00f3);
         if (!h) { printf("  pending stage: open failed\n"); return; }
+        if (flag("SETCONF")) {
+            int sc = libusb_set_configuration(h, 1);
+            printf("  SET_CONFIGURATION added, nothing else changed: rc=%d (%s)\n",
+                   sc, libusb_strerror(sc));
+        }
         printf("  claim: %d (%s)\n", libusb_claim_interface(h, 0),
                libusb_strerror(libusb_claim_interface(h, 0)));
     }
@@ -228,7 +239,7 @@ int main(void)
        pending-before-arm test, in a fresh process. Without this, that stage runs
        after several arms and several successful reads, so its result could be
        hysteresis from the earlier stages rather than a startup property. */
-    if (getenv("ONLY_PENDING")) {
+    if (flag("ONLY_PENDING")) {
         printf("ONLY_PENDING: straight to pending-before-arm, nothing before it\n");
         pending_stage(ctx, 20, 65536);
         libusb_exit(ctx);
@@ -279,7 +290,7 @@ int main(void)
     int n = meta2_send_control(h, 0, 3, 1, &one, 0, 1);
     printf("vendor control read (wValue=3 in_len=1): rc=%d value=%02x\n", n, one);
 
-    if (!getenv("SKIP_PRE")) {
+    if (!flag("SKIP_PRE")) {
         printf("bulk before arm:\n");
         bulk_try(h, "pre-arm ");
     }
