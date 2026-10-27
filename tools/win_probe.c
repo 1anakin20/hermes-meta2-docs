@@ -67,9 +67,11 @@ static void bulk_try(libusb_device_handle *h, const char *stage)
             int sz = SIZES[s];
             unsigned char *b = malloc((size_t)sz);
             int got = 0, rc = LIBUSB_ERROR_OTHER;
+            double t0 = meta2_time_us();
             rc = libusb_bulk_transfer(h, (unsigned char)EPS[i], b, sz, &got, 3000);
-            printf("  %s EP 0x%02x size=%6d: rc=%d (%s) bytes=%d\n", stage, EPS[i], sz,
-                   rc, libusb_strerror(rc), got);
+            double el = (meta2_time_us() - t0) / 1000.0;   /* ms actually waited */
+            printf("  %s EP 0x%02x size=%6d: rc=%d (%s) bytes=%d waited=%.0f of 3000 ms\n",
+                   stage, EPS[i], sz, rc, libusb_strerror(rc), got, el);
             free(b);
             if (got > 0) break;
         }
@@ -106,6 +108,78 @@ static int run_arm(libusb_device_handle *h, int *ok_out, int *fail_out)
     fclose(f);
     *ok_out = ok; *fail_out = fail;
     return 0;
+}
+
+/* Stage 6 support: the Linux recipe at raw libusb level. IN requests are already
+   outstanding on all four endpoints before the arm lands, and every completion is
+   resubmitted immediately, so an endpoint is never left unserviced. On Linux a
+   single blocking URB does exactly this; on Windows each read is aborted, so the
+   question is whether continuous servicing is what makes the device produce. */
+struct pend { struct libusb_transfer *t; unsigned char *buf; int ep; double t0;
+              long long bytes; int completions; int timeouts; int first_ms; };
+static struct pend P[4];
+static volatile int pend_stop;
+
+static void LIBUSB_CALL pend_cb(struct libusb_transfer *t)
+{
+    struct pend *p = (struct pend *)t->user_data;
+    p->completions++;
+    if (t->status == LIBUSB_TRANSFER_COMPLETED) {
+        p->bytes += t->actual_length;
+        if (t->actual_length > 0 && p->first_ms < 0)
+            p->first_ms = (int)((meta2_time_us() - p->t0) / 1000.0);
+    } else if (t->status == LIBUSB_TRANSFER_TIMED_OUT) {
+        p->timeouts++;
+    }
+    if (!pend_stop) { if (libusb_submit_transfer(t) != 0) p->timeouts++; }  /* keep IN queued */
+}
+
+static void pending_stage(libusb_context *ctx, int seconds)
+{
+    libusb_device_handle *h = libusb_open_device_with_vid_pid(ctx, 0x2cfa, 0x00f3);
+    if (!h) { printf("  pending stage: open failed\n"); return; }
+    printf("  claim: %d (%s)\n", libusb_claim_interface(h, 0),
+           libusb_strerror(libusb_claim_interface(h, 0)));
+
+    for (unsigned i = 0; i < 4; i++) {
+        P[i].ep = EPS[i];
+        P[i].bytes = 0; P[i].completions = 0; P[i].timeouts = 0; P[i].first_ms = -1;
+        P[i].buf = malloc(65536);
+        P[i].t = libusb_alloc_transfer(0);
+        libusb_fill_bulk_transfer(P[i].t, h, (unsigned char)EPS[i], P[i].buf, 65536,
+                                  pend_cb, &P[i], 10000);   /* outlast the 8 s arm */
+    }
+    double t0 = meta2_time_us();
+    for (int i = 0; i < 4; i++) P[i].t0 = t0;
+    int submitted = 0;
+    for (int i = 0; i < 4; i++) if (libusb_submit_transfer(P[i].t) == 0) submitted++;
+    printf("  submitted %d of 4 IN requests BEFORE any control traffic\n", submitted);
+
+    int ok = 0, fail = 0;
+    run_arm(h, &ok, &fail);
+    printf("  arm (with IN pending) ok=%d fail=%d (%.2f s)\n", ok, fail,
+           (meta2_time_us() - t0) / 1e6);
+
+    double end = meta2_time_us() + seconds * 1000000.0;
+    while (meta2_time_us() < end) {
+        struct timeval tv = { 0, 100000 };
+        libusb_handle_events_timeout_completed(ctx, &tv, NULL);
+    }
+    pend_stop = 1;
+    for (int i = 0; i < 4; i++) {
+        libusb_cancel_transfer(P[i].t);
+        struct timeval tv = { 0, 200000 };
+        libusb_handle_events_timeout_completed(ctx, &tv, NULL);
+    }
+    for (int i = 0; i < 4; i++) {
+        printf("  pending EP 0x%02x: %lld B completions=%d timeouts=%d first_data=%s\n",
+               P[i].ep, P[i].bytes, P[i].completions, P[i].timeouts,
+               P[i].first_ms < 0 ? "none" : "yes");
+        if (P[i].first_ms >= 0) printf("    first data after %d ms\n", P[i].first_ms);
+        libusb_free_transfer(P[i].t);
+        free(P[i].buf);
+    }
+    libusb_close(h);
 }
 
 int main(void)
@@ -237,6 +311,14 @@ int main(void)
     bulk_try(h, "reopen  ");
 
     libusb_close(h);
+
+    /* Stage 6: the Linux recipe, on a clean handle, with IN requests kept
+       continuously outstanding. Run last so no earlier stage's aborts are in
+       the way. */
+    printf("--- pending-before-arm stage (the Linux recipe)\n");
+    meta2_sleep_us(1500000);
+    pending_stage(ctx, 12);
+
     libusb_exit(ctx);
     return 0;
 }
