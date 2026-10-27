@@ -318,13 +318,83 @@ into a physical Windows machine.
 
 ---
 
-## 20.8 Open items
+## 20.8 WinUSB cannot do the device reset the startup recipe depends on
 
-1. Run a cross-built harness on real Windows with the headset attached, and
-   re-tune `meta2_stream_start()` for the Windows host. The startup recipe is
-   empirical and the hysteresis is not understood; a different host controller
-   and driver stack may need different gate settings. **This is now the first
-   item, because the VM cannot answer it.**
+`[MEASURED - from source]` libusb 1.0.28 `libusb/os/windows_winusb.c`,
+`winusbx_reset_device()`, quoting the Microsoft white paper it is written
+against:
+
+```
+ * "WinUSB does not support host-initiated reset port and cycle port operations"
+ * IOCTL_INTERNAL_USB_CYCLE_PORT is only available in kernel mode and the
+ * IOCTL_USB_HUB_CYCLE_PORT ioctl was removed from Vista => the best we can do
+ * is cycle the pipes (and even then, the control pipe can not be reset using
+ * WinUSB)
+```
+
+What the function actually does: `AbortPipe` + `FlushPipe` + `ResetPipe` on every
+data endpoint, **never the control pipe**, and then:
+
+```
+// libusbK & libusb0 have the ability to issue an actual device reset
+if ((sub_api != SUB_API_WINUSB) && (WinUSBX[sub_api].ResetDevice != NULL))
+    WinUSBX[sub_api].ResetDevice(winusb_handle);
+...
+return LIBUSB_SUCCESS;
+```
+
+So with the plain WinUSB sub-API - which is what our INF selects - a real device
+reset is not attempted at all, and the call still reports success.
+
+`[MEASURED]` On Linux `libusb_reset_device()` is a genuine port reset, and
+`meta2_stream_start()`'s gate recovery is built on it: each failed attempt prints
+"re-armed from a port reset". On Windows that step resets pipes only.
+
+`[MEASURED]` The shape of a real Windows 11 run fits this exactly. First attempt
+arms the way Linux arms:
+
+```
+stream: arm ok=289 fail=118 (6.97 s)      <- Linux: 272 ok / 135 fail in 8.5 s
+```
+
+Every attempt after the first, all of which went through a "port reset", arms a
+different way, identically, five times:
+
+```
+stream: arm ok=404 fail=3 (0.65 s)        <- the starved-mode signature measured
+stream: arm ok=403 fail=4 (0.70 s)           in docs/10: 403 ok / 4 fail in 0.73 s
+stream: arm ok=404 fail=3 (0.64 s)
+stream: arm ok=403 fail=4 (0.70 s)
+stream: arm ok=404 fail=3 (0.65 s)         all five: bytes mux=0 mono=0 rgb=0 tof=0
+```
+
+`[INFERRED]` The device is left in an armed-but-not-producing state, and the gate
+has no way to get out of it on Windows, because the one operation it uses to get
+out is a no-op there.
+
+`[OPEN]` This explains attempts 2-5. It does **not** explain attempt 1, which
+armed in the Linux-like shape after a power cycle and still produced zero bytes.
+That half is unresolved.
+
+Candidate fixes, none implemented or tested:
+- close and reopen the device handle between attempts, which is the nearest user
+  mode equivalent of what a port reset achieves;
+- stop relying on reset at all and find a vendor-protocol command that returns
+  the device to its post-connect state;
+- Windows-side: disable/enable the device node through SetupAPI
+  (`DIF_PROPERTYCHANGE`, `DICS_STOP`/`DICS_START`), which does re-initialise a
+  device from user mode without a kernel driver.
+
+---
+
+## 20.9 Open items
+
+1. Get the device back to its post-connect state on Windows. The harness has now
+   run on real Windows 11: the driver binds, the device opens, control transfers
+   work, the arm runs - and bulk-IN delivers zero bytes on all four endpoints,
+   with the gate unable to recover because its recovery step is a no-op there
+   (20.8). Re-tuning `meta2_stream_start()` is not the first problem any more;
+   finding a Windows-side equivalent of a port reset is.
 2. A distribution signing route for `meta2.inf`. The install itself is solved;
    who signs the catalog is not (see 20.4).
 3. Whether Windows Update rebinds `USB\VID_2CFA&PID_00F3` on Windows 11, and

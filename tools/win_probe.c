@@ -76,6 +76,38 @@ static void bulk_try(libusb_device_handle *h, const char *stage)
     }
 }
 
+/* The arm, read the way meta2_capture_live reads arm_capture.txt:
+     O <wValue> <wIndex> <hex payload>
+     I <wValue> <in_len>                (wIndex fixed to 1)
+   Returns -1 if the command file is missing. */
+static int run_arm(libusb_device_handle *h, int *ok_out, int *fail_out)
+{
+    FILE *f = fopen("arm_capture.txt", "rb");
+    if (!f) return -1;
+    int ok = 0, fail = 0;
+    char line[512];
+    while (fgets(line, sizeof line, f)) {
+        int wv = 0, wi = 0, len = 0;
+        char hex[256];
+        unsigned char payload[256];
+        if (line[0] == 'O') {
+            if (sscanf(line, "O %d %d %255s", &wv, &wi, hex) != 3) continue;
+            len = (int)strlen(hex) / 2;
+            if (len > 256) len = 256;
+            for (int i = 0; i < len; i++) sscanf(hex + 2*i, "%2hhx", &payload[i]);
+            if (meta2_send_control(h, 1, wv, wi, payload, len, len ? len : 1) >= 0) ok++;
+            else fail++;
+        } else if (line[0] == 'I') {
+            if (sscanf(line, "I %d %d", &wv, &len) != 2) continue;
+            if (meta2_send_control(h, 0, wv, 1, NULL, 0, len) >= 0) ok++;
+            else fail++;
+        }
+    }
+    fclose(f);
+    *ok_out = ok; *fail_out = fail;
+    return 0;
+}
+
 int main(void)
 {
     libusb_context *ctx = NULL;
@@ -138,29 +170,9 @@ int main(void)
     /* Stage 2: the full arm, read the same way meta2_capture_live reads it:
        O <wValue> <wIndex> <hex payload>
        I <wValue> <in_len>                (wIndex fixed to 1) */
-    FILE *f = fopen("arm_capture.txt", "rb");
-    if (!f) { printf("no arm_capture.txt next to the exe\n"); libusb_close(h); libusb_exit(ctx); return 2; }
     int ok = 0, fail = 0;
     double t0 = meta2_time_us();
-    char line[512];
-    while (fgets(line, sizeof line, f)) {
-        int wv = 0, wi = 0, len = 0;
-        char hex[256];
-        unsigned char payload[256];
-        if (line[0] == 'O') {
-            if (sscanf(line, "O %d %d %255s", &wv, &wi, hex) != 3) continue;
-            len = (int)strlen(hex) / 2;
-            if (len > 256) len = 256;
-            for (int i = 0; i < len; i++) sscanf(hex + 2*i, "%2hhx", &payload[i]);
-            if (meta2_send_control(h, 1, wv, wi, payload, len, len ? len : 1) >= 0) ok++;
-            else fail++;
-        } else if (line[0] == 'I') {
-            if (sscanf(line, "I %d %d", &wv, &len) != 2) continue;
-            if (meta2_send_control(h, 0, wv, 1, NULL, 0, len) >= 0) ok++;
-            else fail++;
-        }
-    }
-    fclose(f);
+    run_arm(h, &ok, &fail);
     printf("arm ok=%d fail=%d (%.2f s)\n", ok, fail, (meta2_time_us() - t0) / 1e6);
 
     printf("bulk after arm:\n");
@@ -195,6 +207,34 @@ int main(void)
            meta2_send_control(h, 0, 3, 1, &one, 0, 1));
     printf("bulk after reset (no re-arm):\n");
     bulk_try(h, "reset   ");
+
+    /* Stage 5: close and reopen, then arm again. WinUSB cannot do a device
+       reset (see the comment in libusb's windows_winusb.c), so this is the
+       nearest thing to the port reset meta2_stream_start() relies on. If bulk
+       data appears here and not above, the library's recovery step is what has
+       to change on Windows. */
+    libusb_close(h);
+    meta2_sleep_us(1500000);
+    h = libusb_open_device_with_vid_pid(ctx, 0x2cfa, 0x00f3);
+    if (!h) {
+        printf("reopen failed - the node may need Windows to rediscover it\n");
+        libusb_exit(ctx);
+        return 0;
+    }
+    printf("reopened: bus %d address %d speed %s\n",
+           libusb_get_bus_number(libusb_get_device(h)),
+           libusb_get_device_address(libusb_get_device(h)),
+           speed_name(libusb_get_device_speed(libusb_get_device(h))));
+    printf("claim after reopen: %d (%s)\n", libusb_claim_interface(h, 0),
+           libusb_strerror(libusb_claim_interface(h, 0)));
+    ok = fail = 0; t0 = meta2_time_us();
+    if (run_arm(h, &ok, &fail) == 0)
+        printf("arm after reopen ok=%d fail=%d (%.2f s)\n", ok, fail,
+               (meta2_time_us() - t0) / 1e6);
+    else
+        printf("no arm_capture.txt next to the exe\n");
+    printf("bulk after reopen + arm:\n");
+    bulk_try(h, "reopen  ");
 
     libusb_close(h);
     libusb_exit(ctx);
