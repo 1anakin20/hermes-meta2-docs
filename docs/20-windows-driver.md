@@ -499,8 +499,49 @@ idea is dead as an explanation.
 That is the opposite of the Linux recipe, which requires readers pending before
 the arm.
 
-`[OPEN]` Two variables separate the working probe from the failing library, and
-they have not yet been separated from each other:
+#### The device needs ~7.7 s of continuously outstanding IN requests
+
+`[MEASURED]` The pending-before-arm stage with 65536-byte URBs, on real Windows
+11 at SuperSpeed:
+
+```
+arm (with IN pending) ok=269 fail=138 (8.35 s)
+pending EP 0x81: 126,976 B    completions=498 timeouts=1  first data after    1 ms
+pending EP 0x82: 44,957,696 B completions=688 timeouts=1  first data after 7718 ms
+pending EP 0x83: 29,360,128 B completions=450 timeouts=1  first data after 7709 ms
+pending EP 0x84: 20,447,232 B completions=314 timeouts=1  first data after 7649 ms
+```
+
+`[MEASURED]` Four independent endpoints agreed on when the first byte arrived:
+7649, 7709, 7718, 7775 ms - a 126 ms spread. The 1024-byte variant produced
+exactly one 1024-byte completion per endpoint at 7718-7775 ms and then nothing,
+so a large URB is what sustains production once it starts.
+
+`[MEASURED]` `meta2lib`'s readers used a 1500 ms bulk timeout in both the sync
+loop and the async queue. 1500 ms is a fifth of what the device asks for, and on
+Windows an expired transfer is a `WinUsb_AbortPipe`, not an unlink. That is the
+first explanation that accounts for the library failing while the probe succeeds
+with the same handle, same endpoints, same arm.
+
+`[MEASURED]` `meta2_capture_live.exe ... 14 1 150 1024 warm=7e fast gate tries=3`
+still produced zero bytes with 18 timeouts per endpoint - so URB size alone is
+not the answer, and the timeout is the remaining difference.
+
+`[OPEN]` The fix is now a knob, not yet a proven default: `meta2_set_bulk_timeout()`
+and `META2_BULK_TIMEOUT_MS`, default still 1500 because every Linux measurement
+was made at 1500. `rd_ms=10000` has to be measured on the real machine before the
+default changes, and the Linux side has to be re-measured after it.
+
+`[MEASURED]` A separate Windows hazard seen in the same run: the device
+re-enumerates spontaneously (bus address went 25 → 32 → 40 → 53 → 55 across runs,
+and 53 → 55 inside one run). A handle opened before that is dead - the control
+read returned `rc=-9` and every bulk read then returned `rc=-1` immediately with
+`waited=0`. The library has no reopen path for that yet.
+
+`[OPEN]` Throughput is not yet full rate. The probe keeps one URB outstanding per
+endpoint, so 688 completions in ~12.6 s is latency-limited at ~3.6 MB/s against
+the 86 MB/s the mono pair emits in a healthy session. Depth is needed, and depth
+is where the queue-8 access violation lives.
 
 | | pending before arm | 65536-byte URB |
 |---|---|---|
