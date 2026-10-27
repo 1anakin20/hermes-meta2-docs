@@ -198,6 +198,17 @@ int main(void)
     printf("--- candidates on the bus\n");
     list_candidates(ctx);
 
+    /* ONLY_PENDING=1: skip every earlier stage and go straight to the
+       pending-before-arm test, in a fresh process. Without this, that stage runs
+       after several arms and several successful reads, so its result could be
+       hysteresis from the earlier stages rather than a startup property. */
+    if (getenv("ONLY_PENDING")) {
+        printf("ONLY_PENDING: straight to pending-before-arm, nothing before it\n");
+        pending_stage(ctx, 20, 65536);
+        libusb_exit(ctx);
+        return 0;
+    }
+
     libusb_device_handle *h = libusb_open_device_with_vid_pid(ctx, 0x2cfa, 0x00f3);
     if (!h) { printf("open failed\n"); libusb_exit(ctx); return 1; }
     libusb_device *dev = libusb_get_device(h);
