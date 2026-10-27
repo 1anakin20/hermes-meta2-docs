@@ -832,6 +832,49 @@ delivered `mux = 0 B` for the whole window while the cameras kept streaming at
 mono against a 3.33 GB ring. Raised to 20 s, and the tool prints the total
 allocation.
 
+### Correction: warm never ran
+
+`[MEASURED]` `meta2_pump_set_hook()` was installed 19 lines *after* the warm phase.
+The warm branch set `g_warm_active`, slept 4 s and cleared it, and nothing read the
+flag because the pump had no hook yet. Warm has been a four second sleep with no
+asserts in it in every Windows run since the hook was introduced.
+
+`[WITHDRAWN]` "Warm matters: `coverage=1.1091` with `warm=7e` against `0.7536`
+without." Warm was absent from both runs. That difference was not caused by warm.
+
+`[MEASURED]` The arm sequence itself ends by switching everything off: the last two
+feed commands in `data/arm_capture.txt` are `O 6 6 000400000000` (mask 0) and
+`O 9 4 00000000` (mux submask 0), at lines 403 and 406 of 408. A session only
+streams because warm and sustain re-assert after the arm finishes.
+
+### EP 0x81 answers with exactly one record per transfer
+
+`[MEASURED]` With the per-endpoint transfer counters printed:
+
+```
+mono xfers=40387  2,646,802,432 B / 40387 = 65,536.0 B per transfer
+rgb  xfers=25606  1,678,114,816 B / 25606 = 65,536.0 B per transfer
+mux  xfers=2774     710,144 B /  2774 =    256.0 B per transfer
+mux  xfers=6110   1,564,160 B /  6110 =    256.0 B per transfer
+mux  timeouts=0 errors=8 last=CANCELLED resubmit_failed=0
+```
+
+`[MEASURED]` `resubmit_failed=0` on every endpoint, and `errors=8` with
+`last=CANCELLED` is the eight transfers cancelled at teardown, not a fault. The
+library is re-arming the mux transfers and they are completing. This rules out the
+failed-resubmit hypothesis.
+
+`[MEASURED]` The cameras fill every URB completely - 65,536.0 B on all 40,387 mono
+transfers and all 25,606 RGB transfers - and mono held 87.07 MB/s across three
+beats after the burst, 100.5% of nominal. The mux returns exactly one 256-byte
+record per transfer, and after its backlog flush it delivers 6.0 completions/s
+(attempt 1) or 0 (attempt 2), against a nominal ~350/s: **1.7% of nominal.**
+
+`[FIXED]` `data/arm_mux.txt` - the same 408-line sequence with the single
+feed-assert payload changed from `0x7e` to `0x10` (Mux only). The `mask=` command
+line argument only controls the sustain asserts; the arm file is what arms the
+feeds, which is why the earlier `mask=16` test failed to isolate anything.
+
 ### The `fast` sustain loop is what latches the degraded arm
 
 `[MEASURED]` Replacing enable-then-disable with enable-only at `interval_ms`
