@@ -832,7 +832,61 @@ delivered `mux = 0 B` for the whole window while the cameras kept streaming at
 mono against a 3.33 GB ring. Raised to 20 s, and the tool prints the total
 allocation.
 
-### `muxkeep` solved the mux: 3 of 3 attempts live, ~400 records/s steady
+### `mux=0x1f` turns the microphones on — and the mux rate quadruples
+
+`[MEASURED]` Asserting bit 2 (`Mics=4`) on top of `0x1b` produced **73,873 MICS records
+(tag 136) in 25.00 s = 2,955/s**. Total mux: 90,311 records = **3,612 records/s**, 651 KB/s on
+every beat. `mux xfers=90,317` at 256 B each, `host dropped bytes total=0`.
+
+`[MEASURED]` The cameras were untouched: mono 87.32 MB/s, RGB 55.30 MB/s, mono completeness
+99.8%, RGB gaps 99.7% exact, arm `272/135` in 8.14 s — identical to the `0x1b` baseline.
+
+`[MEASURED]` Adding mics **reduced the IMU rates by ~5%**: IMU0 342.4 → 322.7/s, IMU1 352.3 →
+334.8/s. `[INFERRED]` The mux has a shared capacity, not one independent feed per bit.
+
+`[MEASURED]` 2,439 submask writes (98/s) delivered 90,311 records — **37 records per write**.
+The polled model is not merely wrong above 50 writes/s; it is the wrong shape entirely.
+
+## Why `coverage=0.0000` — cadence is a per-feed property
+
+`[MEASURED]` All three attempts printed `coverage=0.0000 clock=0.00 MHz` while
+`span_clock` read 175.16–177.49 MHz (149% of the window). The mic records share timestamps:
+
+```
+[cnt=339517 ts=654059375899] [cnt=339518 ts=654059375899]
+[cnt=339519 ts=654059429914] [cnt=339520 ts=654059429914]
+[cnt=339521 ts=654059483907] [cnt=339522 ts=654059483907]
+```
+
+`[MEASURED]` `coverage=0.0000` is itself the proof: a median of zero requires **at least half**
+of the 90,310 consecutive deltas to be zero. Mic records were 81.8% of the stream, and pairing
+them alone yields at most 40.9%. So the runs are longer than 2.
+
+`[DIAGNOSED]` A single median across interleaved feeds of different cadences is undefined. The
+estimator was calibrated on an IMU-only mux, where every record belongs to one of two feeds with
+the same clock; add a third feed with a different one and it stops measuring anything.
+
+`[FIXED]` `zero_delta_frac` is now in the report and printed (`zero_deltas=0.67` for the
+synthetic reproduction), so a collapsed estimator is visible rather than looking like a stalled
+stream. `tests/test_health.c` reproduces the measured run: zero_deltas 0.67, coverage 0.0000,
+span 148.7% of the window, span_clock 175.20 MHz against 175.16 measured.
+
+`[FIXED]` Gate override: when the estimator rejects a session but the mux delivered at least
+`muxfloor` records/s in steady state (default 260/s, the documented minimum for a configured
+mux), the tool accepts on the measured rate and says so. That criterion separated 400/s from
+25/s on `0x1b` and 2,540/s from 0 on `0x1f` — the same commands the estimator called `FROZEN`.
+
+`[FIXED]` A bug in the steady-rate line itself: the beat history was declared outside the retry
+label and accumulated across attempts, so attempt 2 read "last 6 of 10 beats" — attempt 1's five
+plus attempt 2's five — and printed **0 records/s for a session whose every beat said 651 KB/s**.
+Any steady-rate number from a multi-attempt run before this fix is void.
+
+`[OPEN]` Attempt 1's probe reported `span_clock=35732.65 MHz` — 611 s of device time inside a
+2.01 s probe — while attempts 2 and 3 read 864 and 834 MHz. One record with an extreme timestamp,
+not explainable as backlog at the observed mic rate. Whether mic timestamps share the IMU clock
+epoch and scale is unresolved.
+
+## `muxkeep` solved the mux: 3 of 3 attempts live, ~400 records/s steady
 
 `[MEASURED]` `muxasync=8 muxhz=100 muxkeep` - 8 async submask writes in flight, paced at
 100/s, **every write asserting `0x1b`, never taken low**. 2,430 writes completed per
