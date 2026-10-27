@@ -851,6 +851,25 @@ RGB 44.2 complete frames/s. Every endpoint at or above nominal in the same windo
 `[MEASURED]` The deassert was the culprit. Alternating the submask between 0 and `0x1b` -
 leaving it low half the time - gave 2 live out of 3. Never taking it low gave 3 out of 3.
 
+### The recipe confirmed end-to-end, gate included
+
+`[MEASURED]` Same command again after the gate fix: accepted on the **first** attempt, no re-arm.
+
+```
+window health: health=OK  coverage=0.6353 cov_cal=0.9868 clock=116.26 MHz
+               records=17378 (695/s)  ts_records=17373  span_clock=175.35 MHz
+gate verdict:  estimator clock 116.26 MHz is 98.7% of the calibrated 117.82 MHz
+               (proxy coverage 63.5% reads low for a stream this uniform)
+mux steady over the last 3 of 5 beats: 399 records/s
+mux records=17378  IMU0=8605 (342.4/s)  IMU1=8810 (352.3/s)  MICS=0  NULL_AA=5
+mono completeness: 4436 of 4444 = 99.8%   (88.7 complete frames/s per camera)
+rgb gaps: exact=1106 (99.8%)   complete frames/s 44.2
+host dropped bytes: mono=0 rgb=0 mux=0 total=0
+```
+
+`[MEASURED]` The probe's own `cov_cal` read **5.88** (clock 692.83 MHz). That is the backlog, not
+health - a 2 s probe sees only the flush. Judge liveness from the steady-beat line.
+
 ### The gate was rejecting the best session, and why
 
 `[MEASURED]` All three attempts were called `FROZEN` with coverage 0.630, 0.634, 0.643.
