@@ -832,6 +832,37 @@ delivered `mux = 0 B` for the whole window while the cameras kept streaming at
 mono against a 3.33 GB ring. Raised to 20 s, and the tool prints the total
 allocation.
 
+### Twenty minutes of idle does not recover the device
+
+`[MEASURED]` The same command, run 20 minutes later with the headset left plugged
+in and untouched, produced `arm ok=133 fail=274 (15.41 s)` on **all three attempts**
+- byte-identical to attempts 2 and 3 of the run that had just preceded it
+(`137 / 270` in 15.21 s and `133 / 274` in 15.41 s) - and `mux = 0 B` for the whole
+window on all three, while the cameras streamed at 87.32 and 55.30 MB/s.
+
+`[MEASURED]` The arm shape is therefore a state signature, not noise, and it
+discriminates the mux outcome across every attempt observed:
+
+| arm | duration | EP 0x81 |
+|---|---|---|
+| `256 ok / 151 fail` | 9.01 s | alive: 2,622 records in 2 s, or 8,725 over 25 s |
+| `137 / 270`, `133 / 274` | 15.2-15.4 s | 0 B for the whole window |
+
+The arm issues 407 control transfers either way. A fresh device fails 151 of them
+(37%); the latched device fails 274 (67%).
+
+`[INFERRED]` The bad state is latched by our own control traffic rather than by
+elapsed time: 20 idle minutes did not move it, and only a replug has restored
+`256 / 151`. Not established - the candidate mechanism is the `fast` sustain loop,
+which issues an enable and a disable as fast as the pump can run them.
+
+`[FIXED]` The health gate gained `META2_HEALTH_MUX_DOWN`: EP 0x81 silent while both
+camera endpoints delivered at or above nominal. It was reported as `NO_DATA`, which
+read as a session that produced nothing when it had produced 3.33 GB of mono at
+133 MB/s and 2.22 GB of RGB at 89 MB/s. It still requires a re-arm.
+`tests/test_health.c` asserts both halves, and the arm now prints a histogram of
+which libusb error each failed control transfer returned.
+
 `[OPEN]` Two single-variable tests for EP 0x81, each after a replug because attempt
 1 quality depends on a fresh device. Mux alone with the camera feeds off
 (`mask=16`; Mux is bit 16 of the feed mask) separates a feed problem from bandwidth
