@@ -387,20 +387,75 @@ Candidate fixes, none implemented or tested:
 
 ---
 
-## 20.9 Open items
+## 20.9 The Windows 11 machine is on a USB 2.0 port, and SuperSpeed is a hard gate
 
-1. Get the device back to its post-connect state on Windows. The harness has now
-   run on real Windows 11: the driver binds, the device opens, control transfers
-   work, the arm runs - and bulk-IN delivers zero bytes on all four endpoints,
-   with the gate unable to recover because its recovery step is a no-op there
-   (20.8). Re-tuning `meta2_stream_start()` is not the first problem any more;
-   finding a Windows-side equivalent of a port reset is.
-2. A distribution signing route for `meta2.inf`. The install itself is solved;
+`[MEASURED]` `tools/win_probe.exe` on the real Windows 11 machine:
+
+```
+candidate: bus 2 address 25 speed HIGH 480 Mb/s  class 00 ports: 3
+opened:    bus 2 address 25 speed HIGH 480 Mb/s
+bcdUSB 0210 device class 00 bNumConfigurations 1
+  interface 0 class ff subclass 00 protocol 00 eps 4
+    ep 81 attr 02 maxpacket 512 (burst 0) interval 0
+    ep 82 attr 02 maxpacket 512 (burst 0) interval 0
+    ep 83 attr 02 maxpacket 512 (burst 0) interval 0
+    ep 84 attr 02 maxpacket 512 (burst 0) interval 0
+```
+
+Against the same device on the Linux host and in the VM: `bcdUSB 0300`,
+`wMaxPacketSize 1024`, SuperSpeed 5 Gb/s. So the link negotiated **USB 2.0 High
+Speed**, and the device presented its USB 2 descriptor set.
+
+`[MEASURED]` `ports: 3` is a single port number, so the device sits directly on a
+root hub port - no hub in between. The limitation is the port or the cable.
+
+`[VERIFIED, already in docs/12 §12.29 and docs/14]` This is not a new
+constraint. `meta2_host_impl.dll` gates on it explicitly: it tests byte `+0x979`
+on the device object (the CyAPI SuperSpeed flag) and its `.rdata` carries
+`Device not connected in SuperSpeed mode.` and `Please reconnect device to a
+SuperSpeed port.` docs/12 also records that the physical PC's own diagnostics app
+reported the headset on a USB 2.0 port. docs/15 item 10 lists it as `[VERIFIED]`.
+
+`[MEASURED]` The bandwidth makes it decisive regardless of the gate. Full stream
+at measured cadences:
+
+| endpoint | bytes/frame | frames/s | Mb/s |
+|---|---|---|---|
+| mono pair (`0x82`) | 721,952 × 2 | 60 each | 693 |
+| RGB (`0x83`) | 1,843,232 | 30 | 442 |
+| mux (`0x81`) | 256 | ~1000 | 2 |
+| **total** | | | **~1137 Mb/s ≈ 142 MB/s** |
+
+USB 2.0 High Speed is 480 Mb/s raw. The mono pair alone does not fit.
+
+`[INFERRED]` Zero bytes on *every* endpoint, including the tiny mux, is consistent
+with a device that will not start its streaming engine on a link that cannot
+carry it. Whether the device refuses or merely degrades has not been measured -
+it has never been observed at High Speed on Linux.
+
+`[OPEN]` This supersedes the transport question. Until the headset is on a
+SuperSpeed port on that machine, nothing about `meta2lib`'s Windows bulk path can
+be evaluated, and the port-reset finding in 20.8 is not yet the binding
+constraint.
+
+---
+
+## 20.10 Open items
+
+1. **Get the headset onto a SuperSpeed port on the Windows 11 machine.** This is
+   now the binding constraint (20.9), and it is physical, not software. The
+   machine's own vendor diagnostics reported USB 2.0 back in docs/12 §12.29, and
+   `win_probe` confirms HIGH 480 Mb/s / maxpacket 512 from libusb. Until that
+   changes, no conclusion about `meta2lib`'s Windows bulk path is available.
+2. Get the device back to its post-connect state on Windows. The gate's recovery
+   step is a no-op under WinUSB (20.8). This is real and will bite as soon as the
+   link is SuperSpeed, but it is not yet the thing being tested.
+3. A distribution signing route for `meta2.inf`. The install itself is solved;
    who signs the catalog is not (see 20.4).
-3. Whether Windows Update rebinds `USB\VID_2CFA&PID_00F3` on Windows 11, and
+4. Whether Windows Update rebinds `USB\VID_2CFA&PID_00F3` on Windows 11, and
    what actually wins if it does.
-4. The async reader crash under queue 8 on Windows, once there is a transport
+5. The async reader crash under queue 8 on Windows, once there is a transport
    that can show whether it is real.
-5. The GUI, which is the end goal, is not started.
-6. `ReplaceDevice` syntax, and whether it is even the right mechanism against a
+6. The GUI, which is the end goal, is not started.
+7. `ReplaceDevice` syntax, and whether it is even the right mechanism against a
    Windows 11 rebind.
