@@ -832,7 +832,62 @@ delivered `mux = 0 B` for the whole window while the cameras kept streaming at
 mono against a 3.33 GB ring. Raised to 20 s, and the tool prints the total
 allocation.
 
-### `mux=0x1f` turns the microphones on — and the mux rate quadruples
+### The mux free-runs: `muxhz` is not the control variable once the submask stays asserted
+
+`[MEASURED]` `muxkeep` with `muxasync=8`, `mux=0x1b`, write rate swept 50 → 400/s:
+
+| `muxhz` | writes completed/s | **steady records/s** | total records/s | IMU0+IMU1 /s | span_clock |
+|---|---|---|---|---|---|
+| 50 | 49 | **397** | 1,363 | 688.8 | 175.61 MHz |
+| 100 | 97 | **401** | 690 | 689.7 | 175.11 MHz |
+| 200 | 190 | **401** | 699 | 699.3 | 262.66 MHz |
+| 400 | 353 | **390** | 688 | 687.8 | 175.23 MHz |
+
+An eight-fold change in write rate moved the steady rate by **11 records/s**. The total
+records-per-write collapses from 695 to 49 because the total is dominated by the backlog
+flush, which is not a rate.
+
+`[MEASURED]` `mux=0x1f` at 400 writes/s delivered **fewer** records than at 100: 67,130 vs
+90,311 total, 2,282 vs 2,546 steady. Writing the submask harder is not better.
+
+`[CONCLUDED]` Once the submask is continuously asserted and enough control transfers are in
+flight, the mux streams at its own rate — ~400 records/s for an IMU-only mask, ~2,300–2,550
+with mics added. The host write rate only has to be enough to keep it asserted.
+
+`[INFERRED]` This is the explanation for the Linux bimodality in `docs/10` §10.5 (46.4 / 46.6
+records/s in two runs, 236.6 / 280.3 / 375.9 in three, all on the same `fast` recipe): our own
+Windows history reproduces exactly those two modes — 46–53 records/s when the submask was written
+synchronously, ~400/s once eight transfers were pipelined. The low mode was host-limited. The
+Linux runs were never separated by a device state; they were separated by how fast our own
+keepalive loop completed.
+
+`[MEASURED]` EP0 load is not a bottleneck. 8,816 control transfers in 25 s at `muxhz=400` left
+the cameras untouched: mono 87.32 MB/s, RGB 55.30 MB/s, `total=0` dropped, mono completeness
+99.8%, RGB gaps 99.8% exact.
+
+`[MEASURED]` Mics reduce the IMU throughput by ~5%: IMU totals 688–699/s at `0x1b`, 657–659/s at
+`0x1f`. `[INFERRED]` shared mux capacity rather than one independent feed per mask bit.
+
+`[MEASURED]` **MICS records appeared with `mux=0x1b`** — 16,863 of them, 49.5% of that run's
+stream — even though bit 2 (`Mics=4`) was never asserted in the submask. They came from the
+backlog: the arm sequence itself asserts camera/mux feeds with mask `0x7e`. So `MICS=0` in a
+window is not proof the mic feed is off, only that no mic records survived to the window.
+`[OPEN]` why the `muxhz=50` run kept 16,863 of them and the 100/200/400 runs kept none.
+
+## Records that are not samples
+
+`[MEASURED]` `span_clock` for a healthy window is consistently 175.11–175.61 MHz (148.7% of a
+calibrated second — the backlog inflating it). Two runs in this sweep read **262.66 MHz** and
+**456.33 MHz**, and their counter spans came back **4,276,992,683** and **4,276,492,482** — both
+just under 2^32 — for windows of ~17,000 records. A 32-bit counter incrementing once per record
+could not reach 2^32 in a 105-minute device uptime.
+
+`[DIAGNOSED]` Both spans are min/max over the whole buffer, so a handful of records that are not
+samples own them. The tool now prints the counter and timestamp extremes with their tag and index,
+counts counter jumps >1000 and timestamp gaps >10× the average spacing, and lists the five worst of
+each, so the next run names them instead of averaging over them.
+
+## `mux=0x1f` turns the microphones on — and the mux rate quadruples
 
 `[MEASURED]` Asserting bit 2 (`Mics=4`) on top of `0x1b` produced **73,873 MICS records
 (tag 136) in 25.00 s = 2,955/s**. Total mux: 90,311 records = **3,612 records/s**, 651 KB/s on
