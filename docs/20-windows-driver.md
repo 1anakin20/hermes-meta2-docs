@@ -797,6 +797,48 @@ each: the good run was the first run after a replug. Not established.
 `[OPEN]` Test: replug, run immediately, then run again ~20 min later without
 replugging, and read the uptime line. If coverage tracks uptime, this is a device
 state problem and the library's job is to detect it and say so, not to fight it.
+### The cameras stream at exactly nominal rates; EP 0x81 does not
+
+`[MEASURED]` After a replug (first mux record at **53.1 s** of device uptime), the
+first attempt held both camera endpoints at nominal for the whole window:
+
+```
+beat t=5  -> t=10   mono 87.32 MB/s = 100.79% of nominal   rgb 55.30 MB/s = 100.00%
+beat t=10 -> t=15   mono 87.32 MB/s = 100.79%               rgb 55.30 MB/s = 100.00%
+beat t=15 -> t=20   mono 87.32 MB/s = 100.79%               rgb 55.30 MB/s = 100.00%
+host dropped bytes: mono=0 rgb=0 mux=0 total=0
+```
+
+`[MEASURED]` Converted to frames, that steady state is 87.32 MB/s / 721,952 B =
+120.9 records/s = **60.5 fps per mono camera** against a nominal 60, and 55.30 MB/s
+/ 1,843,232 B = **30.00 records/s** RGB against a nominal 30. The Windows bulk
+transport now delivers the camera endpoints at the device's own emission rate with
+zero drops.
+
+`[MEASURED]` The failure moved to the multiplexor. That same attempt delivered
+671,232 B = 2,622 mux records, **all of them inside the 2.00 s probe**, then zero
+for the remaining 23 s. The gate, which measures only EP 0x81, therefore called a
+session with perfect cameras `STARVED coverage=0.0848`. An earlier run of the same
+command had delivered 8,725 mux records over 25 s at 349/s, so EP 0x81 is
+intermittent rather than dead.
+
+`[MEASURED]` Re-arming on a device that is already streaming degrades the arm and
+kills EP 0x81 outright: attempts 2 and 3 took `137 ok / 270 fail` in 15.21 s and
+`133 / 274` in 15.41 s against attempt 1's `256 / 151` in 9.01 s, and both
+delivered `mux = 0 B` for the whole window while the cameras kept streaming at
+87.33 and 55.30 MB/s.
+
+`[FIXED]` The 12 s backlog allowance was too small for a 15.2 s arm: 3.86 GB of
+mono against a 3.33 GB ring. Raised to 20 s, and the tool prints the total
+allocation.
+
+`[OPEN]` Two single-variable tests for EP 0x81, each after a replug because attempt
+1 quality depends on a fresh device. Mux alone with the camera feeds off
+(`mask=16`; Mux is bit 16 of the feed mask) separates a feed problem from bandwidth
+contention with the cameras. Dropping `fast` replaces the sustain loop's
+enable-then-disable with enable-only at `interval_ms`, which tests whether the
+disable is what drops the mux feed.
+
 
 ### What `coverage` actually measures (do not retune the constant)
 
