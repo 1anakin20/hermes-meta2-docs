@@ -832,6 +832,28 @@ delivered `mux = 0 B` for the whole window while the cameras kept streaming at
 mono against a 3.33 GB ring. Raised to 20 s, and the tool prints the total
 allocation.
 
+### The mux rate tracks the control-transfer rate, one record per transfer
+
+`[MEASURED]` Two sustain shapes, same arm, same window:
+
+| sustain | mux-submask control transfers issued | mux records delivered after the flush |
+|---|---|---|
+| assert-only, `interval_ms=150` | 6.7/s | 6.2/s |
+| `muxtoggle`, `interval_ms=150` (2 per interval) | 13.4/s | 11.4/s |
+
+`[MEASURED]` Both come out at **~1 record per mux-submask control transfer** (0.93 and
+0.85). Doubling the transfers doubled the records. `[INFERRED]` EP `0x81` is being
+*polled*, not streamed: each `0x0009/0x0004` write releases one 256-byte record.
+
+`[MEASURED]` `muxtoggle` did not disturb the cameras: mono 87.32 MB/s and RGB 55.30 MB/s
+on every beat, `total=0` dropped, mono completeness 99.6%, RGB gaps 99.8% exact.
+
+`[OPEN]` Nominal ~350 records/s would need ~350 mux-submask transfers/s. The arm issues
+407 control transfers in 8.15 s - about 20 ms each - so a single thread cannot issue
+that many serially. `muxhz=N` sets the edge rate independently of the camera cadence
+and prints how many edges were actually issued, which turns the hypothesis into a
+number.
+
 ### The post-window hang is fixed, and the mux throttle is now exact
 
 `[MEASURED]` With the outstanding-transfer gate in place, all three attempts printed
