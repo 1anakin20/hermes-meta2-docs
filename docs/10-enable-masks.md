@@ -133,8 +133,25 @@ Two things are not settled:
    fast state from one that does not.
 2. **The mux rate is bimodal**: 46.4 / 46.6 records/s in two runs (identical byte counts, 95,488 B)
    and 236.6 / 280.3 / 375.9 in three. For a tracking front end this is the blocking number — 46
-   records/s across two IMUs is ~23 Hz each, 376 is ~188 Hz each. `[OPEN]` which is the device's
-   rate and what selects between them.
+   records/s across two IMUs is ~23 Hz each, 376 is ~188 Hz each.
+   **Resolved 2026-10-27: the host's control-write cadence selects it, and it is host-independent.**
+   Four Linux runs and four Windows runs, same binary, cameras at nominal and zero dropped bytes in
+   every one:
+
+   | sustain shape | mux-submask writes/s | steady records/s | Linux | Windows |
+   |---|---|---|---|---|
+   | assert-only, synchronous | ~6.7 | 7 | 7 | 7 |
+   | toggle off→on, synchronous | ~49 | 46–53 | **52** | 46–53 |
+   | paced async, 8 in flight, submask never deasserted | ~97 | **399** | 399 | 398–401 |
+   | same, `mux=0x1f` (microphones added) | ~98 | **2,542** | 2,542 | 2,544 |
+
+   The low mode is ~1 record per control write and reproduces on both hosts at the same write rate:
+   `muxtoggle muxhz=50` gives 52 records/s on Linux against the 46.4 / 46.6 recorded above, and
+   46–53 on Windows. The high mode is not a rate control at all — once the submask stays asserted
+   and enough writes are in flight the mux free-runs, and an 8× sweep of the write rate (50 → 400/s)
+   moved the steady rate by 11 records/s. So 46 was never the device's rate; it was the old sustain
+   loop's own write rate read back. The device's rate is ~400 records/s for the IMU pair (~200 Hz
+   each), and the microphones add ~2,150 records/s. `[VERIFIED]`
 
 **Practical rule for a tracking session:** do not start one on a single arm. Gate on throughput —
 measure the first second after arming and re-warm/re-arm if the endpoints are below a floor, because

@@ -1520,6 +1520,42 @@ Backlog is large and consistent: ~26,000 mux records (~10 s at 2,550/s) were
 queued device-side at 125 min uptime, and the cameras never dropped a byte
 while it drained.
 
+## Linux validation of the same recipe — the transport is not Windows-specific
+
+The headset moved to the Linux box (Debian 13, xHCI, `bus 004 speed=5000`, libusb 1.0.28 — the same
+version as Windows, so no version drift explains anything below). Same binary source, same commands.
+
+| run | command tail | arm | steady mux | cov_cal | verdict |
+|---|---|---|---|---|---|
+| 1 | `muxasync=8 muxhz=100 muxkeep` | 272/135, 8.26 s* | **399/s** | 0.6574 | ACCEPTED on the measured rate |
+| 2 | `muxasync=8 mux=1f muxhz=100 muxkeep` | 273/134, 8.21 s | **2,542/s** | 0.9664 | ACCEPTED by the estimator |
+| 3 | no `muxasync` | 273/134, 8.21 s | **7/s** | 0.4445 | REJECTED |
+| 4 | `muxtoggle muxhz=50` | 272/135, 8.26 s | **52/s** | 0.5615 | REJECTED |
+
+\* run 1 armed 256/151 in 9.09 s; runs 2–4 re-armed 272–273/134–135 in 8.2 s.
+
+Cameras were exact on all four: mono 87.31–87.32 MB/s, RGB 55.29–55.30 MB/s, `host dropped bytes`
+zero on every one, mono completeness 99.8–99.9%, RGB gaps 99.8–100.0% exact.
+
+**The steady mux rate is host-independent.** 399/s on Linux against 398–401/s on Windows for
+`mux=0x1b`; 2,542/s against 2,544/s for `mux=0x1f`; 7/s against 7/s with no async pipeline; 52/s
+against 46–53/s at 50 synchronous edges/s. Nothing about the deferred pump, the paced async
+pipeline or `muxkeep` was a Windows-only effect, and none of them had to be re-tuned for Linux.
+
+**What does differ between hosts is the delivery pattern, not the rate.** Run 1 delivered 399
+records/s steady and yet scored `cov_cal 0.6574`, while the Windows run at the same 398 records/s
+scored 0.9834. The Linux mux arrived in clusters — median delta 177,614 ticks against the 295,288
+a uniform 399/s stream would give — while the Windows mux arrived uniformly. This is why the 183 MHz
+proxy was calibrated on Linux and reads low on Windows, and why the calibrated criterion was added.
+Same average rate, different arrival process. `[VERIFIED]` for the measurement; `[INFERRED]` that
+this is a host-side scheduling effect rather than a device-side one, since the device, cable and
+arm sequence were identical.
+
+Run 1 also shows the estimator and the rate floor disagreeing in the useful direction: the estimator
+said FROZEN, the measured 399 records/s said live, and the gate said so out loud. Run 4 is the
+mirror case — 52 records/s is genuinely below the floor and the gate rejected it rather than
+letting a 344 records/s average excuse it.
+
 ## 20.10 Open items
 
 1. **Why bulk-IN never produces on Windows when speed, descriptors, claim,
