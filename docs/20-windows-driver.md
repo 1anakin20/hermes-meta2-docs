@@ -1448,6 +1448,78 @@ is a place where Windows' and Linux's view of the same device differ.
 
 ---
 
+## The fixed estimator on real runs — and the two holes in the gate
+
+Four runs on 2026-10-27 against `meta2lib ee397c1`. All four commands were the
+ones proposed to test the estimator fix.
+
+| command | est | zero_deltas | cov_cal | steady mux | verdict |
+|---|---|---|---|---|---|
+| `mux=1f muxhz=100 muxkeep` | `imu` | 0.02 | **0.9906** | 2,544/s | `health=OK`, no override |
+| `mux=1b muxhz=100 muxkeep` | `imu` | 0.01 | **0.9834** | 398/s | `health=OK`, no override |
+| no `muxasync`, `tries=1` | `imu` | 0.00 | 0.4454 | **7/s** | FROZEN - and silently accepted |
+| `mux=4 muxhz=100 muxkeep` | `imu` | 0.00 | 0.3108 | 2,181/s | FROZEN - and silently accepted |
+
+The estimator fix is confirmed on the first two. `est=imu` selected exactly
+IMU0+IMU1 (16,793 and 17,194 records, matching the tag counts), `zero_deltas`
+fell from 0.42 to 0.02, `cov_cal` landed at 0.99 and 0.98, and **no `gate
+override` line printed** - the estimator accepted them on its own. That absence
+was the point of the test.
+
+### Hole 1: `tries=1` switched the override off entirely
+
+The override lived inside `if (g_gate && trying < g_maxtries && ...)`. On the
+last attempt `trying == g_maxtries`, so the whole block - override included -
+was skipped. `tries=1` therefore disabled the override completely.
+
+The consequence was not a missing line, it was a wrong reading in both
+directions: the `mux=0x04` session at 2,181 records/s looked rejected, and the
+no-`muxasync` session at **7 records/s** looked accepted. Neither printed
+anything saying which had happened.
+
+### Hole 2: a completed-but-rejected final attempt printed no warning
+
+The `WARNING: all N attempts were rejected` line was only reachable when the
+window had been truncated (`aborted`). A window that ran to completion and was
+still FROZEN printed `gate verdict:` and then the full mono/RGB analysis, which
+read as a healthy capture.
+
+Both fixed: one verdict, printed once, for every attempt count -
+`gate: ACCEPTED by the estimator` / `ACCEPTED on the measured rate` /
+`WARNING: gate REJECTED this session`. The override is a judgement about the
+session, not about which attempt it was.
+
+### coverage measures uniformity, not rate
+
+`coverage = median(timestamp delta) x records/s / clock` is invariant under
+throttling: halve the rate and the spacing doubles, so the product is unchanged.
+A synthetic mux at 100 records/s - 38% of the 260/s floor - scores
+`cov_cal 1.0000` and `health=OK`. Locked as a test.
+
+So `cov_cal=OK` proves the timestamps are self-consistent with the calibrated
+oscillator and proves nothing about rate. The 7 records/s run was caught only
+because its spacing was irregular (`cov_cal 0.445`), not because it was slow.
+A uniformly-throttled mux would pass the estimator and can only be caught by
+the measured steady rate. Both checks are load-bearing.
+
+### The mux submask gates each feed's rate separately
+
+| submask | feeds asserted | steady mux | IMU pair | MICS |
+|---|---|---|---|---|
+| `0x1b` | Imu0, Imu1, ToF, Mux | 398/s | ~400/s | backlog only (16,727) |
+| `0x1f` | + Mics | 2,544/s | ~400/s | ~2,150/s |
+| `0x04` | Mics only | 2,181/s | ~0/s after the backlog | ~2,180/s |
+
+`0x1f` steady (2,544) is `0x1b` steady (398) plus the mic feed - the feeds add.
+`mux=0x04` is the informative one: with only the Mics bit sustained, the IMU
+feeds stop once the arm backlog drains. Their 6,122 records are backlog, and
+their timestamps span only 8.03 s of a 25 s window, which is why `cov_cal`
+reads 0.31 there. That is the estimator being correct, not broken.
+
+Backlog is large and consistent: ~26,000 mux records (~10 s at 2,550/s) were
+queued device-side at 125 min uptime, and the cameras never dropped a byte
+while it drained.
+
 ## 20.10 Open items
 
 1. **Why bulk-IN never produces on Windows when speed, descriptors, claim,
