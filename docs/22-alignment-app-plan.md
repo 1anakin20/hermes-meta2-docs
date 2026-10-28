@@ -21,18 +21,22 @@ answer trustworthy.
 | Constraint | Status | Evidence |
 |---|---|---|
 | Must run on Linux **and** Windows | required | operator |
-| **Windows target has no working GPU** | operator-reported, decisive | operator, 2026-10-28 |
-| No GPU ⇒ **no OpenXR runtime is testable on that box today** | `[MEASURED]` | Monado `CMakeLists.txt:251` `XRT_HAVE_VULKAN "…(also needed for compositor)"`; `:285` even `XRT_MODULE_COMPOSITOR_NULL` `DEPENDS … XRT_HAVE_VULKAN`; `:304` `XRT_FEATURE_OPENXR DEPENDS … "COMPOSITOR_MAIN OR COMPOSITOR_NULL"`; `vcpkg.json` hard-depends on `vulkan` + `glslang` |
-| Therefore the app must depend on **no runtime** | `[INFERRED]` | consequence of the two rows above |
+| **The GPU-less box is the Linux terminal backend (`server3`), not the Windows host** | `[OPERATOR-REPORTED]` 2026-10-28, asked directly | operator: *"Your terminal backend, linux box."* Corroborated by environment notes: `server3` carries a Quadro P4000 8 GB with **no driver installed** (the NVIDIA driver pegs the fan) |
+| **The Windows 11 host has a working GPU** | `[MEASURED]` | its own EDID query enumerated `DISPLAY\MVNEA60` on **Intel Iris Xe** |
+| No GPU on `server3` ⇒ **Monado is impaired there**, not on Windows | `[MEASURED]` | Monado `CMakeLists.txt:251` `XRT_HAVE_VULKAN "…(also needed for compositor)"`; `:285` even `XRT_MODULE_COMPOSITOR_NULL` `DEPENDS … XRT_HAVE_VULKAN`; `:304` `XRT_FEATURE_OPENXR DEPENDS … "COMPOSITOR_MAIN OR COMPOSITOR_NULL"`; `vcpkg.json` hard-depends on `vulkan` + `glslang` |
+| `[UNKNOWN]` whether a software Vulkan (Mesa lavapipe) would run Monado on `server3` at usable speed | `[UNKNOWN]` | not tested; a measurement, not an assumption |
+| The app must depend on **no runtime** regardless | `[INFERRED]` | keeps the tool runnable on both boxes, GPU or not |
 | GPU-free rendering stack that is **already proven on the Windows 11 host** | `[MEASURED]` | `meta2-demo-viewer`: `find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)` — no GL/Vulkan component; rendering via `QPainter` + `QImage` (raster). Operator confirmed "It works" on the physical Windows 11 machine |
 | Device plumbing already a library, cross-platform | `[MEASURED]` | `meta2lib` public headers: `stream.h` (`meta2_stream_start/read/health/pending/dropped/describe/stop`), `transport.h`, `mux.h`, `imu_calibration.h`, `calibration.h`, `trailer.h`, `frame.h`, `os.h` |
 | Windows cross-build recipe already exists | `[MEASURED]` | viewer `CMakeLists.txt`: `META2LIB_LOCAL` or `FetchContent` with a **pinned revision**, and `LIBUSB_WIN` → `META2_LIBUSB_ROOT` so meta2lib does not pick up host libusb under MinGW |
 | USB device and HDMI panel must be on the **same machine** | `[INFERRED]` | the app renders to the panel and reads the IMU; both must be local |
+| ⇒ **The natural M0–M4 target is the Windows 11 host** | `[INFERRED]` | it is the machine with both the panel (`DISPLAY\MVNEA60`) and a working GPU; `server3` has the USB device but no confirmed panel connection and no GPU driver |
 
-`[INFERRED]` **Consequence worth stating plainly:** the GPU situation blocks *both* integration tiers on
-Windows. Tier 1 (Monado + remote driver) and Tier 2 (in-tree driver) both need Monado's Vulkan
-compositor. The alignment app is the only substantial thing that can move right now, because it needs no
-runtime at all.
+`[INFERRED]` **Corrected consequence (this row previously had the boxes the wrong way round):** the OpenXR
+runtime work is impaired on the **Linux** box, not the Windows one. Tier 1 and Tier 2 both need Monado's
+Vulkan compositor, and `server3` has no GPU driver. That inverts the earlier "develop on Linux, port to
+Windows" preference recorded in §21.4b — the Linux box is now the one that needs its GPU sorted, or a
+software-Vulkan measurement, before it can host a runtime.
 
 ---
 
@@ -211,8 +215,10 @@ produces its row. Building the in-tree driver before M3 is the failure mode this
 
 ## 22.10 Risks and unknowns, stated plainly
 
-1. **GPU-less Windows.** Blocks any OpenXR runtime there (Vulkan), and makes presentation latency
-   unknown. Not a blocker for this app; a blocker for everything after it on that machine.
+1. **GPU-less Linux backend (`server3`).** Blocks any OpenXR runtime there (Vulkan), and makes
+   presentation latency unknown there. Not a blocker for this app — Qt raster is CPU-based — but a
+   blocker for runtime work on that machine. `[UNKNOWN]` whether Mesa lavapipe would carry Monado at
+   usable speed. The Windows 11 host has a working Iris Xe and is therefore the primary target.
 2. **No magnetometer ⇒ yaw drift.** Handled by test ordering and by quoting the drift rate, not by hoping.
 3. **Eye-band / rotation direction unknown.** Handled by M2.
 4. **3-DoF cannot reveal parallax or depth errors.** A rotation-only rig cannot expose a wrong apparent
@@ -229,9 +235,9 @@ produces its row. Building the in-tree driver before M3 is the failure mode this
 
 `[INFERRED]` In order, with the app's outcome deciding the branch:
 
-1. **Fix the Windows GPU** (or accept Linux as the OpenXR host). Until then no runtime work is testable
-   on Windows, which conflicts with the "Linux *and* Windows both" constraint. This is now a
-   prerequisite, not a preference.
+1. **Sort the `server3` GPU** (install a usable driver for the Quadro P4000, or measure whether Mesa
+   lavapipe runs Monado at usable speed). Until then the Linux box cannot host an OpenXR runtime, which
+   conflicts with the "Linux *and* Windows both" constraint. The Windows 11 host is unblocked.
 2. **VIO / 6-DoF** — needed for row-1/2 confidence (risk 4) and for the OpenXR tracker role regardless.
    Basalt (BSD-3) is the leading candidate; Monado's own tracker already speaks KB4.
 3. **Then** the OpenXR integration, choosing Tier 1 or Tier 2 from the M3 row.
@@ -241,10 +247,10 @@ produces its row. Building the in-tree driver before M3 is the failure mode this
 
 ## 22.12 What I need before writing any code
 
-1. **Which Windows box has no working GPU** — the physical Windows 11 host the headset is plugged into, or
-   the QEMU VM? The EDID read earlier named **Intel Iris Xe** as the adapter for `DISPLAY\MVNEA60`, which
-   is why I will not guess. If it is the physical host, §22.1's runtime-blocked conclusion applies to the
-   primary target; if it is the VM, the physical host is unaffected.
-2. **Approval of the milestone order** — specifically that M1 (AHRS) comes before any display work, since
-   the app's central test depends on pose existing.
+1. ~~Which Windows box has no working GPU~~ — **ANSWERED 2026-10-28: it is the Linux terminal backend
+   (`server3`)**, not the Windows host. §22.1 corrected accordingly, and the Windows 11 host is now the
+   primary M0–M4 target.
+2. **Approval of the milestone order** — specifically whether M1 (AHRS) precedes any display work, since
+   the app's central test depends on pose existing. The alternative is defensible: M2's static phase needs
+   no pose at all, so a visual result could come sooner.
 3. **A physical session** for M2–M4: they need eyes on the visor. Schedule when available.
