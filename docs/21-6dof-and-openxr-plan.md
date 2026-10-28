@@ -1125,6 +1125,8 @@ Everything else in this plan is grounded in the repo.
     `[OPERATOR-PROPOSED]` Per-user manual alignment like the Meta SDK's is adopted as the intended final
     calibration stage; its limits are recorded in §21.4e. `[UNKNOWN]` remains whether the combiner's
     curvature is large enough to need distortion terms at all.
+    **That test is now a planned build: see `docs/22-alignment-app-plan.md`, which also records that a
+    GPU-less Windows host blocks *both* tiers, because Monado's compositor requires Vulkan.**
 
 ---
 
