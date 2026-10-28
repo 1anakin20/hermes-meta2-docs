@@ -31,18 +31,39 @@ make the headset produce a pose. We are trying to reproduce, on our own transpor
 that the vendor's host pipeline consumes. That reframes the whole problem as solvable with what we
 have, plus calibration.
 
-**Fact B — there is no display data path over USB, and the display has no intrinsics.**
-`[MEASURED]` (as an absence, honestly stated) "No evidence was found for: onboard storage
-accessible over USB, an audio output path, or a display data path over USB. The display is driven
-by the headset's own SoC, not by the host." (`docs/01-device.md` §1.7.)
-`[MEASURED]` The vendor rig's display entry is pose-only: `META2_LENS_DISPLAY /* DisplayCalibration:
-pose only */` (`meta2lib/include/meta2/calibration.h` line 46), and `g_cad_display` carries a
-forward vector `(0, +0.922, +0.388)` in the rig's world frame (`docs/19-camera-calibration.md` §19.5).
+**Fact B (corrected 2026-10-28 by the operator) — the display is a generic HDMI display driven from
+the host, and the headset speakers are driven through the same HDMI. It is not a USB problem at all.**
 
-**Consequence:** an OpenXR **HMD role** (runtime renders, headset shows) is not currently reachable.
-An OpenXR **tracking role** (the headset is a pose source a PC runtime can query) is reachable.
-This is the single most important planning decision in this document, and it is a *constraint*, not
-a preference. See §21.4.
+`[OPERATOR-REPORTED]` "The display is a simple HDMI display, the headset speakers are also driven
+through the HDMI. It is not driven by the headset SoC, but rather as a HDMI display from the host."
+(2026-10-28.) This **retracts** the sentence my first draft quoted, and it is not new information in
+the corpus — `docs/01-device.md` §1.7 already carries the correction two paragraphs below the sentence
+I quoted: "**Confirmed by the operator (2026-10-16): the display is a generic display driven over
+HDMI.** It is not a USB data path at all, which is why no endpoint, command class or register in any
+capture has ever looked like a display interface — there is nothing on the USB side to reverse-engineer
+for it." `docs/09` §9.11 repeats it ("the display is simply not a USB problem"), and `docs/12` §12.9
+has an experiment phase labelled literally "**90–150 s HDMI attached**". My draft quoted the stale
+first paragraph and missed the retraction. That was the mistake.
+
+What remains `[VERIFIED]` is only the **absence on the USB side**: no endpoint, command class or
+register has ever looked like a display or audio interface, which is now *explained* rather than
+mysterious — the display and speakers are not on this bus.
+
+`[MEASURED]` What the vendor rig does have for the display is pose-only: `META2_LENS_DISPLAY /*
+DisplayCalibration: pose only */` (`meta2lib/include/meta2/calibration.h` line 46), and `g_cad_display`
+carries a forward vector `(0, +0.922, +0.388)` in the rig's world frame (`docs/19` §19.5). No lens
+model, no screen geometry, no IPD.
+
+`[OPERATOR-REPORTED]` One nuance worth keeping: `docs/13` §13.9 records that holding the left-arm light
+button toggles the HDMI display off and on with an audible "bloop". So the headset's own hardware may
+still gate the display's *enable/power* even though the pixels come from the host.
+
+**Consequence — and it is the opposite of what my first draft said:** an OpenXR **HMD role** is
+feasible. Putting pixels and sound on this headset is an ordinary host-side display problem that the
+host's GPU and audio stack already solve; it is "just a screen". What is *not* solved is rendering
+**correctly**: with no display intrinsics, no screen geometry and no IPD, there is nothing to warp a
+rendered image against. So the HMD blocker moves from *no data path* (false) to *no display optics
+calibration* (true, and measurable). See §21.4.
 
 ---
 
@@ -196,23 +217,32 @@ Inputs: measured `f ≈ 222 px` (mono), measured baseline `B = 0.137995 m`, so `
 
 ## 21.4 The OpenXR decision, made early because it changes everything
 
-OpenXR device roles are not interchangeable. Given Fact B:
+OpenXR device roles are not interchangeable. Given Fact B **as corrected**:
 
 | Role | Feasible today? | Why |
 |---|---|---|
-| **TRACKER** (`XR_EXT_tracking_only`, position+orientation in a tracking space) | **Yes, this is the target.** | Needs only pose + a space + a clock bridge. No display, no inputs. |
-| **HMD** (runtime composites, headset displays) | **No.** | No display data path over USB `[MEASURED absence]`; display calibration is pose-only, no intrinsics `[MEASURED]`. |
+| **TRACKER** (`XR_EXT_tracking_only`, position+orientation in a tracking space) | **Yes — and still the right first target**, but for a different reason than my first draft gave. Not because the display is unreachable, but because pose is the part that does not exist yet and every other role depends on it. | Needs pose + a space + a clock bridge. All three are buildable; none is built. |
+| **HMD** (runtime composites, headset shows) | **Yes, feasible.** `[OPERATOR-REPORTED]` The display and speakers are host-driven HDMI — "it's just a screen". The blocker is **not** a data path. | Blocked instead on: no display intrinsics / screen geometry / IPD `[MEASURED: pose-only DisplayCalibration]`; no validated pose; no latency measurement. All three are measurable, so this is a calibration-and-quality problem, not a missing capability. |
+| **HMD with correct stereo rendering** | **Not yet.** | Correct warping needs per-eye display optics. The vendor rig has none, and the vendor's own compositor exposes per-eye views (`GetDepthStencilViewForLeftEye/RightEye`) whose geometry we have never characterised. `[UNKNOWN]` whether this unit has one shared screen or one per eye — **this is the first thing to establish** (see §21.9). |
 | **HMD with passthrough/depth** | No. | Depth (`0x84`) has never produced scene information (`docs/14` §3: "Depth has never been observed in any path"). |
-| **Hand/controller inputs** | No. | Buttons never observed on the wire (`docs/15` §1). |
+| **Hand/controller inputs** | No. | Buttons never observed on the wire (`docs/15` §1). `[OPERATOR-REPORTED]` Audio **output** is available, over the same HDMI. |
 
-Two implementation routes for the tracker role, both real work, pick one in Phase 0:
+Two implementation routes for the tracker role, both real work, pick one in Phase 0. **Fact B as
+corrected changes this choice, because a runtime that also drives a display is a different amount of
+work than one that does not:**
 
 - **Route A — provider plugin for an existing OpenXR runtime (Monado).** Less surface to build: you
-  implement a device/intent, the runtime handles sessions, spaces, and clients. `[UNKNOWN]` Monado's
-  current tracker-provider API shape and its license compatibility with a GPL VIO backend — must be
-  verified (see §21.11, search backend is down).
+  implement a device/intent, the runtime handles sessions, spaces, and clients. `[INFERRED]` With the
+  display now known to be an ordinary host-side HDMI panel, Route A is also the cheaper route to the
+  **HMD** role, because the runtime already owns display enumeration, swapchains and compositing — you
+  would supply pose and let the runtime present. `[UNKNOWN]` Monado's current tracker-provider API shape,
+  whether it will accept a device whose display is a plain monitor rather than a runtime-managed HMD
+  panel, and its license compatibility with a GPL VIO backend — all must be verified (see §21.11, search
+  backend is down).
 - **Route B — our own minimal OpenXR runtime** that PC apps connect to. Full control, much larger
-  surface (session lifecycle, spaces, swapchains we don't need, conformance).
+  surface (session lifecycle, spaces, swapchains, conformance). `[INFERRED]` Only worth it if the HMD
+  role turns out to need display behaviour no existing runtime offers — which is exactly the question
+  Phase 7's first bullet answers.
 
 `[INFERRED]` Recommendation: **Route A**, because it converts OpenXR from a research risk into an
 integration task, and because a Monado provider is testable with existing OpenXR clients.
@@ -322,8 +352,16 @@ published **drift rate in deg/min** and a published noise floor.
   silently runs the IMUs at ~23 Hz instead of ~200 Hz. The test is whether that rate survives *while
   the mono pair is also being drained at 60 fps* — that combination has not been measured.
 - Allan variance on both chips at rest → noise density, bias instability, correlation time.
-- Measure absolute latency: an event with a known host-side instant (a flashing display the mono
-  cameras see, or an LED driven from the host) timestamped on both sides.
+- Measure absolute latency: an event with a known host-side instant timestamped on both sides.
+  `[INFERRED]` The headset's own HDMI display is a host-controlled light source, **but it cannot
+  measure itself**: `[MEASURED]` every camera on this unit looks *forward, away from the wearer* —
+  mono optical axes `(+0.663, +0.020, +0.748)` and `(−0.666, +0.011, +0.746)`, RGB `(+0.007, +0.001,
+  +1.000)` in the rig world frame where `+z` is forward (`docs/19` §19.5) — while the screen faces the
+  wearer. The headset's cameras see the back of its own display. So the flash test needs an **external**
+  time-known observer: a photodiode on the screen, or a second camera whose own clock is tied to the
+  host. `[MEASURED]` The display CAD frame sits 3.9 cm above and 5.2 cm forward of the depth-camera
+  origin, with forward `(0, +0.922, +0.388)` and 67.16° off identity — the only display geometry the
+  corpus has, and it is a CAD frame, not a screen normal.
 - Measure the per-endpoint trailer offsets that are currently `[INFERRED]` (1.48e9 ticks vs 179,005
   ticks in two sessions).
 *Exit:* a sample rate with uncertainty, an Allan plot, a latency number, a device↔host clock offset
@@ -353,12 +391,36 @@ EKF + relocalisation with our own vocabulary.
 *Exit:* an OpenXR client enumerates the device and receives live pose that matches the §21.8 protocol
 to within the Phase 4 error budget.
 
-**Phase 7 — Optional research branches, explicitly not on the critical path.**
+**Phase 7 — HMD role on the HDMI display.** `[OPERATOR-REPORTED]` makes this possible; Phases 1–6 make
+it worth doing. It is now a calibration and measurement task, not a transport probe.
+
+- **Identify the display from the host side, with no device probing.** What the GPU's EDID reports
+  (panel count, resolution, refresh), whether the audio sink appears as an HDMI device, and whether the
+  headset presents **one panel or two**. `[UNKNOWN]` today, and it is the fork that decides everything
+  below: a runtime that composites two per-eye images and a runtime that drives one flat panel are
+  different devices.
+- **Display optics.** `[MEASURED]` The vendor rig has **no** display lens model — `DisplayCalibration`
+  is pose-only — and the only display geometry in the corpus is a CAD frame. If the screen is viewed
+  directly, there is no distortion to correct and the OpenXR role is a *single-view head-mounted
+  display*, which is a legitimate and much simpler thing. If there are lenses between the screen and
+  the eyes, they must be calibrated before anything can be warped correctly, and IPD is unknown either
+  way.
+- **Display pose in the head frame**, which needs the Phase 3 camera-to-IMU extrinsic (or an equivalent
+  optical route) — the display's pose is known only in the *rig* frame today.
+- **Motion-to-photon latency**, measured with the external observer described in Phase 2.
+
+*Exit:* an OpenXR client's rendered content appears on the headset screen, with a published
+motion-to-photon number and, if optics exist, a published reprojection error. If Phase 7's first bullet
+says "one panel", say so in the docs and stop describing this unit as a stereo HMD.
+
+**Phase 8 — Optional research branches, explicitly not on the critical path.**
 - ToF resume: the decisive experiment is already designed and unbuilt — the v10 proxy run (IR-84) on
   the physical PC, which must print `WIRE HOOK OK` and be read from its `DEVIO` blocks, to recover the
   five control OUT transfers whose data stage `usbmon` never captured (4,498 bytes, including the
   2,336-byte `0x920` transfer at the vendor's `WriteI2C(reg=0xb800)`) (`docs/14` §4, §7).
-- Display data path probe — the only thing that could ever make an HMD role possible.
+- ~~Display data path probe~~ — **withdrawn.** There is no display data path to find; the display is
+  HDMI from the host (`docs/01` §1.7, operator-confirmed 2026-10-16 and again 2026-10-28). Phase 7
+  replaces it.
 - RGB as the appearance/relocalisation stream (`docs/14` §7 item 1).
 - Buttons on the wire (needed for any OpenXR input subaction).
 
@@ -389,15 +451,28 @@ the headset, tell the user what to run and wait for results" (`docs/14` §6). Th
 also stands: leave the headset plugged in for 20 minutes before a run.
 
 Runs this plan will need, in order:
-1. **Tracking-mode capture** — arm with `enable_mask 0x62` (mono + mux + STD), `mux_mask 0x03`
-   (IMU0|IMU1), warm with `0x00` or with the same mask (`docs/10` §10.3), readers pending on all four
-   endpoints (`docs/10` §10.2). Deliver: mono frames + IMU records + device timestamps in one file.
-2. **IMU rate experiment** — fixed mux strobe edge rate, several runs, report the record-rate
-   distribution.
+1. **Tracking-mode capture** — arm with `enable_mask 0x56` = `Mono0(2) | Mono1(4) | Multiplexor(16) |
+   STD(64)`, i.e. mono pair + mux + STD with ToF and RGB not enabled (`docs/10` §10.1 bit table:
+   `Mono0 = 2, Mono1 = 4, ToF = 8, Multiplexor = 16, RGB = 32, STD = 64`), mux submask **`0x1b`** — the
+   value every measured run in `docs/10`, `docs/13` and `docs/20` used; a minimal `0x03` (IMU0|IMU1 only)
+   has **never been tested** and should not be assumed. Warm with `0x7e` then sustain, readers pending on
+   all four endpoints (`docs/10` §10.2). Deliver: mono frames + IMU records + device timestamps in one
+   file.
+   `[MEASURED]` Caveat that changes the intent: disabling RGB in the mask does **not** silence EP `0x83`.
+   `docs/10` §10.1 measured `0x66` (mono + STD) still delivering 52.3 MB/s on EP `0x83`, and flags as
+   `[UNKNOWN]` why `0x60` (RGB only) is slower on `0x83` than `0x66` (mono only) is. So `0x56` is a
+   *statement of intent*, not a bandwidth switch, and the reader set must still drain everything.
+2. **IMU rate under tracking load** — the bimodality question is closed (`docs/10` §10.5); what is
+   unmeasured is the paced-async sustain (`muxkeep`, `muxasync=8`, submask never deasserted) running
+   **while the mono pair is drained at 60 fps**. Report the IMU record rate in that configuration.
 3. **IMU rest capture** — several minutes perfectly still, for Allan variance.
-4. **Latency capture** — flashing target with host-side timestamps.
+4. **Latency capture** — a flashing target with host-side timestamps, observed by an observer that is
+   *not* the headset's own cameras (they face away from its screen; see Phase 2).
 5. **Extrinsic calibration capture** — target + coached IMU.
 6. **Ground-truth protocol runs** — §21.8, ours and the vendor SDK's, sequentially.
+7. **Display identification — host-side only, no headset probing.** What the GPU sees when the headset's
+   HDMI is connected: EDID (panel count, resolution, refresh), and whether an HDMI audio sink appears.
+   Zero cost, settles the single-panel vs per-eye fork that decides the whole HMD branch (§21.4, Phase 7).
 
 ---
 
@@ -406,13 +481,14 @@ Runs this plan will need, in order:
 | Risk | Severity | Mitigation |
 |---|---|---|
 | Camera-to-IMU extrinsics stay out of reach (6–11° floor is the size of the thing we're measuring) | High | Online extrinsic estimation inside the VIO (Phase 4 before Phase 3 closes); optical route with a proper target. |
-| IMU rate never becomes predictable | High | Per-sample device timestamps instead of an assumed dt; the fixed-edge-rate experiment. |
+| IMU rate silently drops to ~23 Hz per chip under a synchronous sustain | High | Use the paced-async sustain (`docs/10` §10.5); assert the rate at acceptance and monitor it, not just throughput. |
 | Host-caused gaps silently corrupt integration | High | Host-side gap detector; refuse to integrate across a gap; report gap statistics. |
 | Mono frame delivery is irregular run to run (27 / 41–77 / 60 fps measured) | High | Design for whole-frames-plus-timestamps; detect missing slots as gaps; never interpolate. Re-derive the `docs/10` §10.5 accounting. |
 | Mono tearing under load | Medium | Gated recipe; **reject** torn frames — the trailer is not a frame delimiter and concatenate-and-cut splices two frames together (`docs/10` §10.4). |
 | EP `0x82` collapse when other endpoints are undrained | Medium | Drain readers on all four endpoints even when discarding (`docs/10` §10.2). |
 | Lens model fails at the frame corners | Medium | Reject out-of-model pixels (`meta2_camera_bearing() == -1`); mask the corner caps, not a rectangular border. |
-| OpenXR HMD role turns out to be impossible | Accepted | Plan the tracker role; keep the display probe as a separate research branch. |
+| HMD role is feasible but **uncalibrated** — no display intrinsics, no IPD, one panel or two unknown | High | Phase 7's first bullet is host-side EDID/panel identification, which costs nothing and settles the fork before any rendering work. |
+| Plan built on a stale corpus sentence (this document's first draft got Fact B wrong) | Process | Quote the **whole** section, not the first paragraph. `docs/01` §1.7 retracts its own sentence two paragraphs down; a grep for the sentence, not for the topic, is what missed it. |
 | Third-party VIO license incompatible with our distribution | Unknown | Resolve in Phase 0. `[UNKNOWN]` — could not verify this session (search backend down, §21.11). |
 | Blank-wall / looking-down scenes break visual tracking | Medium | Report it honestly as a property of the rig (§21.3); IMU-only fallback with degraded status. |
 | Reusing vendor `vslam_voc.bin` | N/A | Not available; not needed if we use a third-party vocabulary or build our own. |
@@ -439,8 +515,9 @@ Everything else in this plan is grounded in the repo.
 
 ## 21.12 Decisions needed from the user before any work starts
 
-1. **OpenXR role:** accept TRACKER-first (recommended), or spend research effort on the display path
-   first?
+1. **OpenXR role:** TRACKER-first (recommended — pose is the part that does not exist and everything
+   else depends on it), or HMD-first now that the display is known to be a plain host-driven HDMI
+   screen? Note this is no longer a feasibility question, only a sequencing one.
 2. **OpenXR route:** Monado provider (recommended) vs our own runtime?
 3. **VIO strategy:** reuse-first as a measurement instrument (recommended) vs in-house from day one?
 4. **License posture:** is a GPL VIO backend acceptable in this stack?
@@ -481,8 +558,14 @@ project state/display/identity). The findings that changed this plan:
   stream (the central open problem)". Every attributed register is ToF-imager side. So there is no
   hidden device-side tracking knob to find.
 - **What sits behind the Cypress FX3 bridge is unidentified** — headset SoC, FPGA, or the FX3's own RAM
-  (`docs/01` §1.2, `docs/04`). The headset SoC is invoked in the corpus only for the display, the
-  buttons and a possible IR-emitter enable path — never for tracking.
+  (`docs/01` §1.2, `docs/04`). The headset SoC is invoked in the corpus only for the buttons and a
+  possible IR-emitter enable path — never for tracking. ~~and for the display~~ **corrected
+  2026-10-28:** the display is not on the SoC, it is HDMI from the host (Fact B).
+- **One of the four doc-mines reproduced a stale sentence, and so did I.** The mine reported the corpus
+  as saying there is no display data path and the display is SoC-driven, because that is what
+  `docs/01` §1.7's *first* paragraph says. The same section retracts it two paragraphs later. `[LESSON]`
+  Quote a section whole before turning it into a load-bearing fact; grepping for the topic finds the
+  claim, not the retraction.
 - **Zero prior art in the corpus:** no occurrence of OpenXR, Monado, libsurvive or SteamVR anywhere in
   `meta2-docs` or the skill references (corpus-wide grep, 2026-10-28).
 
@@ -498,8 +581,12 @@ What this plan does **not** resolve, and should not be read as resolving:
 4. Absolute latency, and therefore whether OpenXR pose prediction is achievable to any useful bound.
 5. Whether the mono shutter is global or rolling — `docs/15` §3 says a 60 Hz target cannot decide it,
    and the pan test has no recorded real-device verdict.
-6. Whether the display has any host-reachable data path at all. Until something proves otherwise, the
-   OpenXR HMD role stays out of the plan rather than deferred within it.
+6. **How many panels, and what optics in front of them.** The display being host-driven HDMI is settled
+   by the operator and is no longer an open question. What is still unknown is everything a renderer
+   needs: panel count, resolution, refresh, whether lenses sit between the screen and the eyes, and IPD.
+   The corpus has a pose-only `DisplayCalibration` and one CAD frame, nothing else. Phase 7's first
+   bullet settles the panel question from the host side at zero cost, and it should be run before any
+   rendering decision is made.
 7. Whether the Meta 2's published specifications agree with anything independent — the corpus states
    outright that no external spec has ever been cited here (`docs/07` §7.8), and §21.11 says this
    session could not check.
