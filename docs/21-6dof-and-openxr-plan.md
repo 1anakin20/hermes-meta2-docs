@@ -667,6 +667,73 @@ parameters such as display scanout time and direction" (25.1.0, !2617), a "panel
 (2026-05-05), and "support compensation for rolling scanout hmds" (2025-10-08). An in-tree driver can
 therefore report our panel's real refresh behaviour to the compositor instead of guessing 60 vs 72 Hz.
 
+### 21.4e Per-user manual alignment is the vendor's own model — and it widens what out-of-tree can do (2026-10-28)
+
+`[OPERATOR-REPORTED]` *"instead of photographing each user can just set their own calibration? Like how
+the metaSDK does it. It runs the calibration app, the user moves the lines until they match, the
+calibration is then saved."*
+
+`[MEASURED]` **The corpus already answers what the vendor's model is.** `DisplayCalibration` entries —
+`g_cad_display` and `g_pmd_cad` — carry **poses and no intrinsics** (`docs/19` §19.5, `docs/11` §11.4
+index order `8 g_cad_display 9 g_pmd_cad`). The vendor's representation of *where the display is* is a
+**6-DoF pose**, not a distortion model. `g_cad_display`: rotation 67.16°, translation
+`(0, −0.03880, +0.05241)`, forward `(0, +0.92160, +0.38820)`, in the rig frame (defined by `depth`
+identity).
+
+`[MEASURED]` **Therefore my previous claim was too strong.** §21.4d said out-of-tree "genuinely cannot
+fix the projection". What it cannot express is **distortion**. What it *can* express is **per-eye view
+pose**, and that is the vendor's model class for this exact hardware. `r_hmd.c:86-109`:
+
+```c
+if (!rh->r->latest.head.per_view_data_valid) {
+    return u_device_get_view_poses(...);   // Monado's own eye-relations math
+}
+for (uint32_t i = 0; i < view_count; i++) {
+    out_poses[i] = rh->r->latest.head.views[i].pose;   // verbatim from the wire
+    out_fovs[i]  = rh->r->latest.head.views[i].fov;
+}
+```
+
+`[MEASURED]` With `per_view_data_valid` set, Monado returns the client's per-view pose and FOV
+**verbatim**, bypassing its own eye-relation computation. A Tier 1 client therefore controls each eye's
+view pose exactly — enough to place a virtual image per eye, which is what a pose-only display model
+needs.
+
+`[INFERRED]` **We already have a starting display pose.** `g_cad_display` is in the same rig frame our
+tracking will produce. Pose + display pose is a renderable see-through image with **no new calibration
+written at all**. The open question is not "can we express it" but "is a pose-only model adequate".
+
+`[INFERRED]` **Which makes the decisive experiment far cheaper than §21.4d proposed — no camera, no
+photography, no driver.** Render a virtual object from tracking pose + `g_cad_display`, look through the
+visor, and read the outcome:
+
+| Observed | Meaning | Consequence |
+|---|---|---|
+| Object stays put and sits where pointed | pose-only is adequate | Tier 1 out-of-tree is sufficient for the display |
+| Stays put but offset / wrong scale / wrong depth | pose error, per-user variation | **the operator's manual alignment fixes it**, out-of-tree, via per-view poses |
+| Straight lines visibly bend, or the image deforms off-axis | real combiner distortion | in-tree driver required (`compute_distortion`) |
+
+`[INFERRED]` **Per-user alignment is necessary regardless of which row we land in.** Perceived alignment
+depends on the viewer's eye position, which varies per user and per fit; that is why the vendor's setup
+is per-user. Monado's own North Star files encode the same idea as a user-editable pose
+(`t265_to_nose_bridge`). So the alignment step is not a workaround for a missing measurement — it is the
+correct final stage of the calibration.
+
+`[INFERRED]` **Its honest limits.** A user adjusting lines by eye can fix a **pose** error (6 DoF, or a
+reduced 4-knob version: x, y, z, yaw) and can compensate small scale error. A user **cannot** fix
+high-order distortion by eye, and cannot recover a combiner shape that is simply wrong. So manual
+alignment is the right tool for row 2 and the wrong tool for row 3 — which is exactly why the
+three-outcome test must run before choosing the integration shape.
+
+`[UNRESOLVED]` **Tension worth naming.** The external spec says `Optics: Curved mirrors`, but the vendor's
+display calibration is pose-only. Either the combiner is flat enough that a pose suffices, or the
+vendor's per-user alignment absorbs the residual, or curvature is handled somewhere not yet found in the
+corpus. `g_cad_display`'s forward `(0, +0.922, +0.388)` is consistent with a near-flat combiner
+reflecting a downward-facing panel, which supports the first reading — but that is inference from one
+vector, not a measurement of the optic.
+
+---
+
 ## 21.5 Reuse an existing VIO, or build ours
 
 `[INFERRED]` **Do both, in that order, and do not debate it before Phase 4 numbers exist.**
@@ -1047,17 +1114,17 @@ Everything else in this plan is grounded in the repo.
    after all?
 9. **First build:** Phase 1 (IMU-only 3-DoF AHRS, no new device capability, exercises the whole pose
    path) before any visual work (recommended), or go straight at the VIO?
-10. **Driver commitment — deferred behind a measurement (new 2026-10-28).** The operator's worry about
-    the visor projection being "wrong and not fixable" out-of-tree is **correct**: `d/remote` hardcodes
-    `u_distortion_mesh_set_none`, so only an in-tree driver can express the combiner. But the rebase tax
-    is measured at ~2–3 breaking interface changes per 2.4 years costing 5–25 lines each (§21.4d), so it
-    is not the reason to avoid in-tree. `[INFERRED]` The right sequence is therefore: run the
-    **visor-projection experiment first** (render a known pattern to the panel, photograph it through the
-    visor with the headset's own cameras, fit a North-Star-style 4 × 16 polynomial + camera→display pose)
-    because it is runtime-independent and it is the only step that can prove the problem is solvable.
-    Commit to the in-tree driver after that measurement, not before. `[UNKNOWN]` whether the projection is
-    recoverable from a photographable pattern at all — that is now the highest-value unknown in the
-    project, above tracking.
+10. **Driver commitment — deferred behind a cheaper test than first proposed (revised 2026-10-28).**
+    §21.4d's photography experiment is superseded by §21.4e: the vendor's own display model is
+    **pose-only** (`DisplayCalibration` has poses, no intrinsics), and Monado's remote protocol returns
+    client-supplied per-view poses **verbatim** (`r_hmd.c:86-109`), so out-of-tree can express a pose-only
+    display model. `[INFERRED]` The test is therefore: render from tracking pose + the already-measured
+    `g_cad_display` pose, look through the visor, and read which of the three outcomes in §21.4e occurs —
+    adequate (Tier 1 suffices), pose error (**the operator's per-user manual alignment fixes it,
+    out-of-tree**), or visible bending (in-tree required). No camera, no photography, no driver code.
+    `[OPERATOR-PROPOSED]` Per-user manual alignment like the Meta SDK's is adopted as the intended final
+    calibration stage; its limits are recorded in §21.4e. `[UNKNOWN]` remains whether the combiner's
+    curvature is large enough to need distortion terms at all.
 
 ---
 
