@@ -72,11 +72,20 @@ a preference. See §21.4.
    `calibration.h` header comment; `docs/18`). The corpus's own conclusion: **"what is still missing
    for a real VIO input set is calibration, not protocol"** (`docs/15` §5 Phase 4). This is the
    blocker.
-2. **IMU sample rate.** `[UNKNOWN]`. The mux record rate is host-driven and bimodal — 80.6 / 371 /
-   448 records/s measured with the same tag mix (`docs/15` §1). A filter cannot be tuned, and a
-   preintegration cannot be trusted, without a dt model. Mitigation exists: every IMU record carries
-   a device timestamp, so dt can be *measured per sample* rather than assumed — but the noise floor
-   of that dt is unknown.
+2. **IMU sample rate — resolved 2026-10-27, and it was our own loop, not the device.**
+   `[MEASURED]` `docs/10` §10.5: the mux rate is set by the **host's control-write cadence** and is
+   host-independent. Four Linux and four Windows runs of the same binary, cameras at nominal, zero
+   dropped bytes: assert-only synchronous → 7 records/s; toggle off→on synchronous → 46–53; paced
+   async with 8 writes in flight and the submask never deasserted → **399 (Linux) / 398–401
+   (Windows)**; same with `mux=0x1f` (microphones added) → **2,542 / 2,544**. An 8× sweep of the write
+   rate (50 → 400/s) moved the steady rate by 11 records/s, so the high mode is a free-run, not a rate
+   control. **The device's rate is ~400 records/s for the IMU pair, ~200 Hz each.** The old 46.4/46.6
+   figure was the previous sustain loop's own write rate read back. `[MEASURED]` `docs/10` §10.9
+   independently: IMU0 and IMU1 each advance 589,109 ticks per record = **200.05 Hz**, and the IMU
+   cadence is invariant across starved and healthy sessions.
+   `[OPEN]` what remains is *which sustain shape a tracking session will use*, because the rate is a
+   property of the host loop — a tracking front end must run the paced-async sustain or it silently
+   drops to ~23 Hz per IMU. That is a design constraint, not an unknown.
 3. **IMU noise characterisation.** `[UNKNOWN]`. Vendor `noise_sigma`/`bias_sigma` are 0 and
    `bias_cov` is zero — placeholders. Only rest standard deviations exist (gyro ~2 counts, accel
    37–148 counts). No Allan variance has ever been computed.
@@ -239,7 +248,8 @@ by-product. That is the reason to sequence reuse before in-house work.
 **Step 2 — build ours only if Step 1 shows the rig is capable but the third-party estimator fights
 our quirks.** Our quirks are precisely the things generic VIOs assume away: a production-coupled
 device clock that is uptime rather than wall time, host-caused gaps invisible in device time, a
-host-driven bimodal IMU rate, torn frames that must be rejected rather than spliced, and a lens model
+host-loop-dependent IMU rate that silently drops to ~23 Hz if the sustain shape is wrong, torn frames
+that must be rejected rather than spliced, and a lens model
 that fails at the corners of its own frame. An in-house pipeline would be: keyframe stereo VO on the
 mono pair (KB4, known extrinsics, frame-locked) + IMU preintegration + EKF fusion + ORB relocalisation
 with our own vocabulary. That is a multi-month project and should not be started on faith.
@@ -305,8 +315,12 @@ entire pose path — time base, gap detection, units, axis map — before any vi
 published **drift rate in deg/min** and a published noise floor.
 
 **Phase 2 — Pin the IMU time base, noise, and the clock bridge.** (device work, small)
-- Fix the mux strobe edge rate and test whether the bimodal mux rate collapses — the corpus's own
-  open question (`docs/07`).
+- **Adopt the paced-async sustain as the tracking session's sustain shape and prove the IMU rate holds
+  under tracking load.** The bimodality question is closed (`docs/10` §10.5, resolved 2026-10-27): the
+  rate follows the host's write cadence, and only "submask never deasserted, ~8 writes in flight"
+  reaches the device's free-run ~400 records/s. A tracking front end that uses a synchronous toggle
+  silently runs the IMUs at ~23 Hz instead of ~200 Hz. The test is whether that rate survives *while
+  the mono pair is also being drained at 60 fps* — that combination has not been measured.
 - Allan variance on both chips at rest → noise density, bias instability, correlation time.
 - Measure absolute latency: an event with a known host-side instant (a flashing display the mono
   cameras see, or an LED driven from the host) timestamped on both sides.
@@ -478,7 +492,9 @@ What this plan does **not** resolve, and should not be read as resolving:
    has ever validated a pose — ours or the vendor's — against ground truth. §21.8 exists because that
    gap is the largest single unknown in the project.
 2. The camera-to-IMU extrinsic, and whether the 6–11° gravity floor can be beaten at all.
-3. The IMU sample rate, its noise spectrum, and whether the bimodal mux rate can be made predictable.
+3. The IMU noise spectrum, and whether the ~200 Hz IMU rate actually holds while the mono pair is
+   drained at 60 fps — the combination has never been measured (`docs/10` §10.5 closed *why* the rate
+   varies; it did not measure it under tracking load).
 4. Absolute latency, and therefore whether OpenXR pose prediction is achievable to any useful bound.
 5. Whether the mono shutter is global or rolling — `docs/15` §3 says a 60 Hz target cannot decide it,
    and the pan test has no recorded real-device verdict.
