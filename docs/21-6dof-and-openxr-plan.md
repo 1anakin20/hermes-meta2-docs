@@ -406,6 +406,104 @@ Windows-specific work left is presentation, and B already covers it.
 
 `[MEASURED]` Monado source is now on the Linux box at `~/work/monado-src` (sparse: `doc`,
 `src/xrt/drivers/remote`, `src/xrt/drivers/wmr`) for reference.
+
+### 21.4b The Windows question, answered from Monado's build system (2026-10-28)
+
+The user's requirements are now **fixed constraints**, not preferences:
+
+1. Any game engine or software that supports OpenXR should be able to use the headset. Existing AR
+   OpenXR software working is a *maybe*, not a priority.
+2. Tracking may run in a separate process.
+3. Rendering must actually work — the headset must show a picture.
+4. **Linux and Windows are both targets.** Not Linux-first-with-Windows-later: "lots of people and
+   software only use windows".
+
+Against those constraints, four facts read directly out of Monado's tree.
+
+**1. The remote driver is explicitly a Windows-supported driver.** `[MEASURED]`
+`CMakeLists.txt:375`:
+
+```cmake
+option_with_deps(XRT_BUILD_DRIVER_REMOTE "Enable remote debugging driver"
+                 DEPENDS "XRT_HAVE_LINUX OR ANDROID OR WIN32")
+```
+
+`src/xrt/drivers/CMakeLists.txt:279-292` builds `drv_remote` and, under `if(WIN32)`, links `ws2_32`
+(Windows Sockets). `r_interface.h` includes `<winsock2.h>` under `XRT_OS_WINDOWS` with an explicit
+comment that winsock2 must precede `windows.h`, and `r_hub.c` carries 11 `XRT_OS_WINDOWS` branches
+wrapping `SOCKET`/`closesocket` versus `int`/`close`. This is cross-platform code that Monado
+intends to build on Windows.
+
+`[INFERRED]` **This removes Monado's two named Windows blockers from our path.** `doc/winbuild.md`
+blocks Windows on "no actual headset drivers yet … some USB stuff needs porting" and "direct mode on
+Windows is more complicated". `d/remote` needs **no USB** (poses arrive over TCP) and **no direct
+mode** (our panel is an ordinary HDMI monitor). Neither blocker applies to the A′ shape.
+
+**2. The Windows build-and-run path is documented end to end.** `[MEASURED]` `doc/winbuild.md`:
+vcpkg manifest mode + Visual Studio 2022 + Vulkan SDK + Ninja; `-DXRT_FEATURE_SERVICE=ON` for the
+out-of-process build; start `monado-service.exe`; register the runtime by pointing
+`XR_RUNTIME_JSON` at the generated `openxr_monado-dev.json` ("Proper install of a runtime in Windows
+involves registry modifications"); then `hello_xr.exe -G Vulkan`. `[INFERRED]` An OpenXR client on
+Windows can run against Monado today, from a binary tree we build ourselves — no upstream packaging
+is required for us to ship it.
+
+**3. The wire contract is one fixed struct — small enough to implement directly.** `[MEASURED]`
+`r_interface.h`: `r_remote_data { uint64_t header /* "mndrmt3\0" */; r_head_data head;
+r_remote_controller_data left, right; }`. `r_head_data` = 2 × {`xrt_fov`, `xrt_pose`, pad} (48 B each)
++ `center` pose + `per_view_data_valid`. Device geometry is supplied by the caller:
+`r_create_devices(port, view_count, w_pixels, h_pixels, w_meters, h_meters, &out_xsysd)`. So our
+client sends head-centre pose, per-eye poses, per-eye FOV, and panel pixels/metres. Controller fields
+exist in the struct; we have no controllers, so they stay `active = false`.
+
+**4. Correction to §21.4a's FOV claim.** `[MEASURED]` FOV is **supplied by the client** for view
+poses — `r_hmd.c:107` returns `latest.head.views[i].fov` from the wire. Only `hmd_get_info` hardcodes
+it (`r_hmd.c:157-163`: 120° for one view, 85° per view for two). So our measured FOV reaches
+`get_view_poses`; the FOV reported in `XrViewConfigurationView` is not client-controlled. Distortion
+remains `u_distortion_mesh_set_none` (`r_hmd.c:175`).
+
+**5. Monado's tracking interface fits our sensor set.** `[MEASURED]`
+`src/xrt/include/xrt/xrt_tracking.h`: `XRT_TRACKING_MAX_CAMS 8`, `XRT_TRACKING_MAX_IMUS 3`. We have
+2 mono + 1 RGB and 2 IMUs — inside both limits.
+
+**6. `libmonado` is not an embedding API.** `[MEASURED]` `doc/packaging-notes.md`: "`libmonado`, which
+_does_ have a public API as a management interface for software serving as a Monado front-end or
+dashboard". `[INFERRED]` "Ship one binary that is a runtime" means building Monado **in-process**
+(`XRT_FEATURE_SERVICE=OFF`) with our driver linked in — not calling `libmonado`.
+
+**7. Passthrough exists in Monado's OpenXR surface.** `[MEASURED]` Changelog: "OpenXR: Implement
+extension 'XR_FB_passthrough'", plus "Add interface for XR_FB_passthrough in Ipc communication" and
+"…in client side"; source files `oxr/oxr_passthrough.c`, `oxr/oxr_api_passthrough.c`. `[INFERRED]`
+Third-party AR apps that want a camera feed would use it, but it is fed by a driver that produces
+passthrough frames — i.e. option **A**, not A′. `[UNKNOWN]` whether Monado will expose passthrough to
+clients for a device that has no native passthrough system.
+
+**What works on each OS, as of today.**
+
+| Capability | Linux | Windows | Evidence |
+|---|---|---|---|
+| `meta2lib` device access at nominal rates | proven | proven | our own runs on both |
+| Monado serving OpenXR clients | yes | yes, from our own build | `doc/winbuild.md` |
+| Pose-only HMD device via `d/remote` | yes | **yes, explicitly enabled** | `CMakeLists.txt:375`, `ws2_32` link |
+| In-tree driver reading our USB device | straightforward | our work, not a Monado blocker — `meta2lib` already works on Windows | `[INFERRED]` |
+| Monado's Basalt VIO fed by our frames | needs the in-tree driver | same | `[INFERRED]` |
+| Curved-mirror distortion through `d/remote` | no (`set_none`) | no | `r_hmd.c:175` |
+| Third-party AR passthrough | needs the in-tree driver | needs the in-tree driver | `XR_FB_passthrough` |
+
+`[INFERRED]` **Consequence: A′ is the cross-platform spine, and it is cheap because tracking is a
+separate process.** Since the pose producer is out-of-process, the OpenXR device provider never
+touches USB — it is a TCP client with identical code on both operating systems. Device access stays
+in `meta2d`, already proven on both. Presentation works because `d/remote` yields a 2-view
+side-by-side HMD on a 1440 × 2560 panel, which Monado composites as an ordinary window on both OSes.
+What A′ cannot express: the visor's projection (no distortion hook) and passthrough for third-party
+apps.
+
+`[INFERRED]` **Two-tier plan, which is what "Linux and Windows both" actually implies.**
+- **Tier 1 — both OSes, no Monado fork:** `meta2d` + our VIO + a `mndrmt3` client. Any OpenXR app gets
+  a tracked, 2-view HMD on the headset panel, on Linux and on Windows. This satisfies constraints 1,
+  2, 3 and 4 with the least new code.
+- **Tier 2 — the AR product:** an in-tree Monado driver that feeds Monado's Basalt and supplies
+  distortion + passthrough. Developed on Linux, ported to Windows second. This is the only tier that
+  can express the curved mirror.
 - **Route B — our own minimal OpenXR runtime** that PC apps connect to. Full control, much larger
   surface (session lifecycle, spaces, swapchains, conformance). `[INFERRED]` Only worth it if the HMD
   role turns out to need display behaviour no existing runtime offers — which is exactly the question
@@ -763,19 +861,21 @@ Everything else in this plan is grounded in the repo.
    1440 × 2560 @ 72 Hz panel with no lenses? `[INFERRED]` The display side is now the *easier* half, so
    the sequencing argument for tracker-first got stronger, not weaker: rendering to a visor without
    validated pose produces something that visibly swims.
-2. **OpenXR route — CLOSED by the operator 2026-10-28: Monado (Route A), cross-platform — the Linux box
-   and Windows.** `[MEASURED]` Monado's own docs make the Windows half the expensive half: "not ready for
-   widespread usage due to some rough edges and lack of drivers", "no actual headset drivers yet … some
-   USB stuff needs porting". `[INFERRED]` Build the provider on Linux first; schedule Windows as its own
-   phase.
-2a. **Integration shape — proposed, needs the operator's yes/no.** Per §21.4a: (i) the tracking pipeline
-   is a **standalone process** from day one, because it has to exist whichever runtime we pick; (ii) the
-   first live OpenXR session goes through Monado's **remote device protocol** (`mndrmt3`), which needs no
-   Monado fork and no Windows USB driver; (iii) our own see-through content renders **directly to the
-   panel** rather than waiting on a runtime's compositor; (iv) the in-tree Monado `xrt_device` driver is
-   developed on Linux, where Monado is finished, and is what eventually lets third-party OpenXR apps use
-   the headset. `[MEASURED]` Monado already carries a Basalt-based VIO backend, so (i) may mean "feed
-   Monado's tracker" rather than "write a VIO" — worth deciding before writing any estimator code.
+2. **OpenXR route — CLOSED by the operator 2026-10-28: Monado (Route A), cross-platform — Linux *and*
+   Windows, both required.** `[OPERATOR-REPORTED]` "With cross platform, we want linux and windows
+   support (lots of people and software only use windows)." `[MEASURED]` §21.4b revises my earlier
+   reading: Monado's remote driver is explicitly enabled on Windows by its own CMake
+   (`DEPENDS "XRT_HAVE_LINUX OR ANDROID OR WIN32"`, `ws2_32` link), and `doc/winbuild.md` documents a
+   working `monado-service.exe` + `XR_RUNTIME_JSON` client path. Monado's two named Windows blockers —
+   USB headset drivers and direct mode — do not apply to our device shape. **Windows is not a
+   prerequisite; it is a same-tier target.**
+2a. **Integration shape — CLOSED by the operator 2026-10-28.** `[OPERATOR-REPORTED]` "The tracking can
+   be run on another process, that is fine." "Rendering is important to be doable, we want the headset
+   to show a picture." That approves the two-tier shape in §21.4b: standalone tracking process, Tier 1
+   over `mndrmt3` on both OSes, Tier 2 in-tree driver for distortion and passthrough.
+   `[INFERRED]` One consequence worth naming: because the runtime must present on the machine that has
+   the panel, and the panel is on the Windows 11 host, **Tier 1 has to be demonstrated on Windows**, not
+   only on Linux.
 2b. **Display pacing — CLOSED by the operator 2026-10-28: aim for 72 Hz.** `[OPERATOR-REPORTED]` "The
    display does appear as 72hz on the windows settings." `[INFERRED]` Design budget 13.9 ms/frame, but
    query the mode at runtime instead of hardcoding 72, so a 60 Hz fallback is a config change rather than
@@ -785,9 +885,13 @@ Everything else in this plan is grounded in the repo.
    **BSD 3-Clause**, so the GPL worry that motivated this question applies only to OpenVINS and
    ORB-SLAM3. `[MEASURED]` All three licenses read from their own `LICENSE` files. The remaining question
    is only: do we want a GPL VIO in the stack at all, given a permissive option covers our camera model?
-5. **Tracking host:** now entangled with decision 2. The device is on Windows 11, Monado is finished on
-   Linux and unfinished on Windows. `[INFERRED]` Either the device moves to the Linux box for tracking
-   work, or the Monado Windows port becomes a prerequisite rather than a target. Pick which.
+5. **Tracking host — largely dissolved by §21.4b.** The earlier framing ("device on Windows, Monado
+   finished on Linux") assumed the runtime needed USB access to our device. With the pose producer
+   out-of-process, the runtime needs only a local socket, so **the runtime runs on whichever machine
+   has the panel** — Windows 11 today, Linux whenever the headset moves. `[INFERRED]` The remaining
+   host question is only where the *tracking* process runs, and it can be the same machine as the
+   runtime. Cross-machine (`mndrmt3` connects by address + port) stays available as option C, not as a
+   requirement.
 6. ~~Search backend~~ — **CLOSED 2026-10-28.** It works; the residual caveat (some queries return an
    empty array and succeed when rephrased) is recorded in §21.11. Nothing in this plan is blocked on it.
 7. **Scope discipline:** ToF stays paused (recommended — it is not on the 6-DoF critical path), or
