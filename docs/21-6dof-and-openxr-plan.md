@@ -497,7 +497,69 @@ side-by-side HMD on a 1440 × 2560 panel, which Monado composites as an ordinary
 What A′ cannot express: the visor's projection (no distortion hook) and passthrough for third-party
 apps.
 
+### 21.4c "In-tree" defined, and what each tier actually costs (measured 2026-10-28)
+
+**What "in-tree" means.** Our driver lives *inside Monado's source tree* and is compiled as part of
+Monado: a `drv_meta2` static library behind a `XRT_BUILD_DRIVER_META2` CMake option, added to
+`ENABLED_HEADSET_DRIVERS` in `src/xrt/drivers/CMakeLists.txt`, instantiated either by an auto prober
+(`rs_prober.c` is the pattern) or by a target builder (`target_builder_remote.c`, 4,755 B, is the
+no-prober pattern). It then links against Monado's **internal** interfaces — `xrt_device`,
+`xrt_tracking`, the frame pipeline (`u_sink`/`u_frame`), the compositor. Out-of-tree (Tier 1) means the
+opposite: a stock Monado binary plus a client that speaks its published wire protocol.
+
+`[MEASURED]` Why in-tree is the only shape that reaches the end goal:
+
+| Capability | Out-of-tree (`d/remote`) | In-tree driver |
+|---|---|---|
+| Pose delivery to OpenXR apps | yes | yes |
+| Feed our stereo frames + IMU to Monado's Basalt VIO | **no** — protocol carries no frames | yes (`xrt_tracking.h`, 8 cams / 3 IMUs) |
+| Express the curved-mirror / visor projection | **no** — `u_distortion_mesh_set_none` (`r_hmd.c:175`) | yes (`compute_distortion`, distortion mesh) |
+| Passthrough for third-party AR apps | **no** | yes (`XR_FB_passthrough`, `oxr_passthrough.c`) |
+| Display/refresh control | no | partially; direct mode still OS-dependent |
+| Maintenance under Monado API churn | none (wire protocol is stable) | rebase tax unless upstreamed |
+
+`[MEASURED]` Effort, from Monado's own file sizes:
+
+| Piece | Size | Notes |
+|---|---|---|
+| `d/remote` driver side (already exists) | 1,410 lines, 5 files | we do not write this |
+| `target_builder_remote.c` (no-prober registration) | 4,755 B | the pattern for registering a device |
+| `xrt_device` interface | 1,204-line header, **29 function pointers** | most are NULL-able; the minimum HMD (`r_hmd.c`, ~180 lines) implements essentially `get_view_poses` plus `device_type`/`hmd` fields |
+| WMR HMD core (`wmr_hmd.c` 2,075 + `wmr_camera.c` 752) | **2,827 lines** | closest analogue: USB HMD with cameras + IMU + calibration feeding Monado's tracker |
+| Whole WMR driver (incl. controllers, Bluetooth) | 7,713 lines | upper bound; most of it is controllers we do not have |
+| Realsense driver | 5 files, ~68 KB | delegates camera work to Intel's SDK, so not a fair comparison |
+
+`[INFERRED]` **Tier 1 ≈ 200–400 lines of new code** (a `mndrmt3` client: TCP connect, fill one fixed
+struct, send per frame) plus a Monado Windows *build* task (vcpkg manifest mode, VS 2022, Vulkan SDK,
+`-DXRT_FEATURE_SERVICE=ON`). Zero Monado source changes, zero rebase tax. Throwaway client, but the
+tracking process behind it is not throwaway.
+
+`[INFERRED]` **Tier 2 ≈ 1,500–3,000 lines of new C**, roughly 5–10× Tier 1 — and the estimate is on
+the *favourable* side because `meta2lib` already supplies the part that dominates a driver's line
+count on other devices: USB protocol, framing, trailer/clock, calibration parsing, on both operating
+systems. What remains is Monado-side plumbing: an `xrt_device`, a frame sink into `xrt_tracking`,
+calibration upload, a builder or prober, a CMake option.
+
+`[MEASURED]` **The cost that is not code:** Monado's `doc/developer/…` warns the XRT interfaces are not
+a stable external API. An in-tree driver we do not upstream is a permanent rebase against every Monado
+release. Upstreaming moves that cost to them; Monado already carries niche single-panel HMDs
+(Direct-Tek WVR2 / VR-Tek 2560×1440 via OpenHMD), so acceptance for a discontinued headset is
+plausible but unproven. `[UNKNOWN]` whether upstream would accept a driver for a device they cannot
+test.
+
+`[INFERRED]` **A custom OpenXR runtime is not necessary** for the stated goal. A runtime's job is the
+OpenXR API surface, spaces, actions, swapchains, composition and IPC — Monado has all of it on both
+operating systems and maintains it. Our custom work is a **device driver**, not a runtime. A custom
+runtime becomes justified only if presentation demands something no runtime offers (e.g. true direct
+mode on Windows), which is a Phase 7 measurement question, not an assumption.
+
+`[INFERRED]` **Sequencing consequence:** Tier 1 is scaffolding, not a competing destination. Its only
+justification is that it proves pose delivery into a real runtime and lets pose quality be judged
+through real OpenXR clients before the driver exists. If we decide to skip it, the destination is
+unchanged — Tier 2 — and only the early demo is lost.
+
 `[INFERRED]` **Two-tier plan, which is what "Linux and Windows both" actually implies.**
+
 - **Tier 1 — both OSes, no Monado fork:** `meta2d` + our VIO + a `mndrmt3` client. Any OpenXR app gets
   a tracked, 2-view HMD on the headset panel, on Linux and on Windows. This satisfies constraints 1,
   2, 3 and 4 with the least new code.
