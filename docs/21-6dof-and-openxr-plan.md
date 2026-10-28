@@ -65,6 +65,43 @@ host's GPU and audio stack already solve; it is "just a screen". What is *not* s
 rendered image against. So the HMD blocker moves from *no data path* (false) to *no display optics
 calibration* (true, and measurable). See §21.4.
 
+### Fact B.1 — the display, measured from the host (2026-10-28)
+
+`[MEASURED]` The operator enumerated the panel from Windows with no device probing:
+
+| Fact | Value | Source |
+|---|---|---|
+| Panel count | **One.** Windows enumerates exactly two displays: `DISPLAY\DELD01D\…` (the operator's Dell monitor) and `DISPLAY\MVNEA60\…` (the headset). | `Get-CimInstance -Namespace root\wmi -ClassName WmiMonitorID` |
+| EDID vendor/product | `MVN` + `EA60` — a distinct EDID identity, not a generic sink. `[INFERRED]` `MVN` = Metavision. | same |
+| EDID declared modes | **`NumOfMonitorSourceModes = 1`**, `PreferredMonitorSourceModeIndex = 0` — a fixed embedded panel that declares exactly one mode. | `WmiMonitorListedSupportedSourceModes` |
+| Mode | **1440 × 2560 @ 72 Hz**, 8-bit, RGB, SDR, **variable refresh rate: Not Supported** | Windows display adapter properties, display named **"Meta2"** |
+| GPU driving it | Intel(R) Iris(R) Xe Graphics (host iGPU) | same |
+| Optics | **No lenses.** The panel is **reflected onto a visor** — an optical see-through combiner, not a lens-coupled direct-view HMD. | `[OPERATOR-REPORTED]` |
+
+`[MEASURED]` This corroborates the rig. `g_cad_display`'s forward is `(0, +0.922, +0.388)` — "the
+screen faces mostly downward and 22° toward the front" (`docs/19` §19.5) — which is exactly the layout a
+downward-facing panel reflecting off a visor produces. `[MEASURED]` The rig has **no visor entry at
+all**: `DisplayCalibration` gives poses for `g_cad_display` and `g_pmd_cad` and no intrinsics, and
+nothing in the rig describes the combiner itself.
+
+`[INFERRED]` **This is a monocular optical see-through display, not a stereo HMD.** One panel, no
+lenses, one combiner. That removes two blockers my draft listed and adds one:
+
+- **IPD is not needed.** There is no second eye image to separate. Drop it from the blocker list.
+- **Lens distortion is not needed.** There is no lens to invert.
+- **What replaces them is the visor projection**: the mapping from panel pixels to virtual-image rays,
+  set by the combiner's shape and its pose relative to the eye. Nothing in the corpus or the rig
+  describes it. That single unknown is now the whole display-calibration problem.
+
+`[MEASURED]` A concrete lead for reimplementing the vendor's alignment setup: `CompositorBlock`
+(library `meta_block_compositor`) declares `loose_fusion_name = LooseFusionBlock` and
+`sensors_db_task_name = SensorsDbBlock` (`artifacts/sdk_graph_schema.txt` lines 118–137) — the vendor's
+renderer consumes **pose from the fusion block and calibration from the sensors DB**, and the sensors DB
+is what holds the rig including `g_cad_display`. `[INFERRED]` So the vendor's "align the rendered
+content" step is very likely a pose stored in that rig, which `meta2lib` already reads off the device.
+`[UNKNOWN]` whether the vendor setup writes a new value into the rig, into a separate file, or keeps it
+in memory only — that is a host-side SDK observation to make, not a device experiment.
+
 ---
 
 ## 21.1 What is already solved (measured inventory)
@@ -82,6 +119,7 @@ calibration* (true, and measurable). See §21.4.
 | IMU axis map | Solved to a stated floor. Chips sit ~45° off the headset frame; `ay` is vertical on both with opposite signs; `meta2_imu_to_headset()` exists. | `docs/18` §18.2, `meta2lib/include/meta2/imu_calibration.h` |
 | Frame integrity | Solved *by the gated recipe, in one run*: mono delivered 1,199/1,199 frame slots per camera, resyncs 0, dropped 0. The corpus itself marks repeating this as open. See §21.3 for the full delivery picture. | `docs/15` §1 EP `0x82` (and its `[OPEN]` note in §3) |
 | Vendor architecture reference | Decoded. `VSlamBlock` (library `meta_block_slam`, vocabulary `data/vslam_voc.bin`, `target_frame=mono_right`, `source_frame=world`, REALTIME TRIGGERED thread) → `LooseFusionBlock`. Vendor SLAM is ORB-SLAM2-derived (`meta_block_pangolin_viewer.dll`). | `artifacts/sdk_graph_schema.txt`, `docs/12` §12.19 |
+| Display (host side) | Solved as a display, unsolved as optics. `[MEASURED]` One panel, `DISPLAY\MVNEA60`, one EDID source mode, **1440 × 2560 @ 72 Hz**, 8-bit RGB SDR, no VRR, on Intel Iris Xe. `[OPERATOR-REPORTED]` No lenses; reflected onto a visor. `[MEASURED]` The rig has a `g_cad_display` pose and **no combiner entry**. | `docs/21` Fact B.1, `docs/19` §19.5 |
 | OpenXR prior work | **None.** Zero occurrences of OpenXR / Monado / libsurvive / SteamVR anywhere in `meta2-docs` or the skill references. Greenfield. | corpus-wide grep, 2026-10-28 |
 
 ---
@@ -222,8 +260,9 @@ OpenXR device roles are not interchangeable. Given Fact B **as corrected**:
 | Role | Feasible today? | Why |
 |---|---|---|
 | **TRACKER** (`XR_EXT_tracking_only`, position+orientation in a tracking space) | **Yes — and still the right first target**, but for a different reason than my first draft gave. Not because the display is unreachable, but because pose is the part that does not exist yet and every other role depends on it. | Needs pose + a space + a clock bridge. All three are buildable; none is built. |
-| **HMD** (runtime composites, headset shows) | **Yes, feasible.** `[OPERATOR-REPORTED]` The display and speakers are host-driven HDMI — "it's just a screen". The blocker is **not** a data path. | Blocked instead on: no display intrinsics / screen geometry / IPD `[MEASURED: pose-only DisplayCalibration]`; no validated pose; no latency measurement. All three are measurable, so this is a calibration-and-quality problem, not a missing capability. |
-| **HMD with correct stereo rendering** | **Not yet.** | Correct warping needs per-eye display optics. The vendor rig has none, and the vendor's own compositor exposes per-eye views (`GetDepthStencilViewForLeftEye/RightEye`) whose geometry we have never characterised. `[UNKNOWN]` whether this unit has one shared screen or one per eye — **this is the first thing to establish** (see §21.9). |
+| **HMD** (runtime composites, headset shows) | **Yes, feasible.** `[OPERATOR-REPORTED]` The display and speakers are host-driven HDMI — "it's just a screen". `[MEASURED]` One panel, 1440 × 2560 @ 72 Hz, 8-bit RGB SDR, no VRR. The blocker is **not** a data path. | Blocked instead on: the visor projection (below), no validated pose, no latency measurement. All measurable, so this is a calibration-and-quality problem, not a missing capability. |
+| **Monocular see-through rendering** (the honest description of this device) | **Yes, and it is simpler than my draft assumed.** `[OPERATOR-REPORTED]` One panel, **no lenses**, image reflected onto a visor. | **No IPD needed** (no second eye image) and **no lens distortion to invert**. What is needed is the **combiner projection** — panel-pixel → virtual-image-ray — which nothing in the corpus or the rig describes. The vendor has a user-facing alignment setup for exactly this; see Fact B.1 for the lead on reimplementing it. |
+| **Stereo HMD** (two per-eye images) | **No — and this unit is not one.** `[MEASURED]` One panel (`DISPLAY\MVNEA60`, one EDID mode). | Stop describing this device as a stereo HMD. The vendor compositor's per-eye views (`GetDepthStencilViewForLeftEye/RightEye`) are a software artefact of a generic compositor, not evidence of two panels. |
 | **HMD with passthrough/depth** | No. | Depth (`0x84`) has never produced scene information (`docs/14` §3: "Depth has never been observed in any path"). |
 | **Hand/controller inputs** | No. | Buttons never observed on the wire (`docs/15` §1). `[OPERATOR-REPORTED]` Audio **output** is available, over the same HDMI. |
 
@@ -391,27 +430,35 @@ EKF + relocalisation with our own vocabulary.
 *Exit:* an OpenXR client enumerates the device and receives live pose that matches the §21.8 protocol
 to within the Phase 4 error budget.
 
-**Phase 7 — HMD role on the HDMI display.** `[OPERATOR-REPORTED]` makes this possible; Phases 1–6 make
-it worth doing. It is now a calibration and measurement task, not a transport probe.
+**Phase 7 — HMD role: monocular see-through rendering on the visor.** `[OPERATOR-REPORTED]` +
+`[MEASURED]` (Fact B.1) make this possible; Phases 1–6 make it worth doing.
 
-- **Identify the display from the host side, with no device probing.** What the GPU's EDID reports
-  (panel count, resolution, refresh), whether the audio sink appears as an HDMI device, and whether the
-  headset presents **one panel or two**. `[UNKNOWN]` today, and it is the fork that decides everything
-  below: a runtime that composites two per-eye images and a runtime that drives one flat panel are
-  different devices.
-- **Display optics.** `[MEASURED]` The vendor rig has **no** display lens model — `DisplayCalibration`
-  is pose-only — and the only display geometry in the corpus is a CAD frame. If the screen is viewed
-  directly, there is no distortion to correct and the OpenXR role is a *single-view head-mounted
-  display*, which is a legitimate and much simpler thing. If there are lenses between the screen and
-  the eyes, they must be calibrated before anything can be warped correctly, and IPD is unknown either
-  way.
-- **Display pose in the head frame**, which needs the Phase 3 camera-to-IMU extrinsic (or an equivalent
-  optical route) — the display's pose is known only in the *rig* frame today.
-- **Motion-to-photon latency**, measured with the external observer described in Phase 2.
+Panel facts are **settled**: one panel, `DISPLAY\MVNEA60`, **1440 × 2560 @ 72 Hz**, 8-bit RGB, SDR, no
+VRR, driven by the host's Intel Iris Xe. `[COMPUTED HERE]` That is a **13.9 ms** frame period and
+**3.69 Mpix/frame ≈ 265 Mpix/s** of fill — modest for a modern iGPU, and the number OpenXR frame pacing
+should target. No VRR means the runtime must pace to a fixed 72 Hz.
 
-*Exit:* an OpenXR client's rendered content appears on the headset screen, with a published
-motion-to-photon number and, if optics exist, a published reprojection error. If Phase 7's first bullet
-says "one panel", say so in the docs and stop describing this unit as a stereo HMD.
+What is left, in order:
+
+- **The visor projection — the only remaining display unknown.** `[MEASURED]` No lens, so no distortion
+  model to fit; `[MEASURED]` the rig has a `g_cad_display` pose and **no visor entry at all**. The thing
+  to determine is the mapping from panel pixels to virtual-image rays. `[INFERRED]` Because there is no
+  lens, this is plausibly a small pose problem (where the virtual image plane sits relative to the eye)
+  rather than a distortion problem — which is why the vendor's setup is an *alignment*, not a lens
+  calibration. Start by observing what the vendor's alignment setup actually changes host-side (a file,
+  a registry value, a rig rewrite, or nothing at all) before designing our own.
+- **An alignment procedure we can run ourselves**, mirroring the vendor's: render a known pattern, have
+  the operator report where it lands against a physical edge, solve the transform. `[INFERRED]` This is
+  the cheapest display calibration available and needs no fixture beyond a ruler and a wall.
+- **Display pose in the head frame** — needs the Phase 3 camera-to-IMU extrinsic; today `g_cad_display`
+  is expressed only in the *rig* frame.
+- **Motion-to-photon latency**, measured with the external observer from Phase 2 (the headset cannot see
+  its own visor — every camera faces forward).
+
+*Exit:* an OpenXR client's rendered content appears correctly aligned on the visor, with a published
+motion-to-photon number and a published description of how the alignment was obtained. If the alignment
+turns out to need more than a pose — i.e. the visor has real distortion — say so in the docs rather than
+forcing it into a pose model.
 
 **Phase 8 — Optional research branches, explicitly not on the critical path.**
 - ToF resume: the decisive experiment is already designed and unbuilt — the v10 proxy run (IR-84) on
@@ -470,9 +517,16 @@ Runs this plan will need, in order:
    *not* the headset's own cameras (they face away from its screen; see Phase 2).
 5. **Extrinsic calibration capture** — target + coached IMU.
 6. **Ground-truth protocol runs** — §21.8, ours and the vendor SDK's, sequentially.
-7. **Display identification — host-side only, no headset probing.** What the GPU sees when the headset's
-   HDMI is connected: EDID (panel count, resolution, refresh), and whether an HDMI audio sink appears.
-   Zero cost, settles the single-panel vs per-eye fork that decides the whole HMD branch (§21.4, Phase 7).
+7. ~~Display identification~~ — **DONE 2026-10-28, host-side only.** Results in Fact B.1: one panel
+   (`DISPLAY\MVNEA60`, one EDID source mode), 1440 × 2560 @ 72 Hz, 8-bit RGB SDR, no VRR, Intel Iris Xe,
+   no lenses, image reflected onto a visor. Still worth one more host-side read: the **native panel
+   orientation** — Windows reports the desktop mode as 1440 wide × 2560 tall, which is portrait, and
+   whether that is the panel's native orientation or a rotation setting changes how a renderer should
+   present. `[UNKNOWN]`
+8. **Vendor alignment observation** — host-side, no device probing. Run the Meta SDK's display alignment
+   setup and record what it actually changes: a file, a registry value, a rig rewrite, or nothing
+   observable. That tells us whether the alignment is a stored pose we can read with `meta2lib` or
+   something else entirely (Fact B.1).
 
 ---
 
@@ -487,7 +541,9 @@ Runs this plan will need, in order:
 | Mono tearing under load | Medium | Gated recipe; **reject** torn frames — the trailer is not a frame delimiter and concatenate-and-cut splices two frames together (`docs/10` §10.4). |
 | EP `0x82` collapse when other endpoints are undrained | Medium | Drain readers on all four endpoints even when discarding (`docs/10` §10.2). |
 | Lens model fails at the frame corners | Medium | Reject out-of-model pixels (`meta2_camera_bearing() == -1`); mask the corner caps, not a rectangular border. |
-| HMD role is feasible but **uncalibrated** — no display intrinsics, no IPD, one panel or two unknown | High | Phase 7's first bullet is host-side EDID/panel identification, which costs nothing and settles the fork before any rendering work. |
+| HMD role is feasible but the **visor projection is uncalibrated** — the rig has a panel pose and no combiner | High | Phase 7: observe what the vendor's alignment setup changes host-side, then run our own ruler-and-wall alignment procedure. No lens to fit, so start from a pose model and only add terms if the evidence demands them. |
+| Panel orientation assumed (Windows reports 1440 × 2560, i.e. portrait) | Medium | Confirm the panel's native orientation before writing a renderer; a wrong assumption puts a 2560-tall image into a 1440-tall viewport. |
+| Monado route assumed to run on the same Windows host as the device | Medium | Confirm which OS Monado actually runs on before planning the display path; Monado's Windows support is `[UNKNOWN]` here (search backend down). |
 | Plan built on a stale corpus sentence (this document's first draft got Fact B wrong) | Process | Quote the **whole** section, not the first paragraph. `docs/01` §1.7 retracts its own sentence two paragraphs down; a grep for the sentence, not for the topic, is what missed it. |
 | Third-party VIO license incompatible with our distribution | Unknown | Resolve in Phase 0. `[UNKNOWN]` — could not verify this session (search backend down, §21.11). |
 | Blank-wall / looking-down scenes break visual tracking | Medium | Report it honestly as a property of the rig (§21.3); IMU-only fallback with degraded status. |
@@ -515,10 +571,17 @@ Everything else in this plan is grounded in the repo.
 
 ## 21.12 Decisions needed from the user before any work starts
 
-1. **OpenXR role:** TRACKER-first (recommended — pose is the part that does not exist and everything
-   else depends on it), or HMD-first now that the display is known to be a plain host-driven HDMI
-   screen? Note this is no longer a feasibility question, only a sequencing one.
-2. **OpenXR route:** Monado provider (recommended) vs our own runtime?
+1. **OpenXR role:** TRACKER-first (still recommended — pose is the part that does not exist and
+   everything else depends on it), or HMD-first now that the display is measured as a single
+   1440 × 2560 @ 72 Hz panel with no lenses? `[INFERRED]` The display side is now the *easier* half, so
+   the sequencing argument for tracker-first got stronger, not weaker: rendering to a visor without
+   validated pose produces something that visibly swims.
+2. **OpenXR route — CLOSED by the operator 2026-10-28: Monado (Route A).** `[OPERATOR-REPORTED]` "monado
+   works fine." One thing to confirm rather than assume: the headset and its HDMI panel are on a Windows
+   11 host (Fact B.1), and `[UNKNOWN]` — unverifiable this session, search backend down (§21.11) — how
+   well Monado's Windows build supports presenting to a real secondary display. If Monado is actually
+   running on Linux for you, then the tracking host decision (item 5) and the display work have to be
+   planned on Linux, and the Windows side becomes a second target rather than the first.
 3. **VIO strategy:** reuse-first as a measurement instrument (recommended) vs in-house from day one?
 4. **License posture:** is a GPL VIO backend acceptable in this stack?
 5. **Tracking host:** Windows 11 (where the device is) first, Linux second — or both from the start?
@@ -581,12 +644,11 @@ What this plan does **not** resolve, and should not be read as resolving:
 4. Absolute latency, and therefore whether OpenXR pose prediction is achievable to any useful bound.
 5. Whether the mono shutter is global or rolling — `docs/15` §3 says a 60 Hz target cannot decide it,
    and the pan test has no recorded real-device verdict.
-6. **How many panels, and what optics in front of them.** The display being host-driven HDMI is settled
-   by the operator and is no longer an open question. What is still unknown is everything a renderer
-   needs: panel count, resolution, refresh, whether lenses sit between the screen and the eyes, and IPD.
-   The corpus has a pose-only `DisplayCalibration` and one CAD frame, nothing else. Phase 7's first
-   bullet settles the panel question from the host side at zero cost, and it should be run before any
-   rendering decision is made.
+6. ~~Whether the display has a host-reachable path, and how many panels~~ — **resolved 2026-10-28**
+   (Fact B.1): one panel, 1440 × 2560 @ 72 Hz, no lenses, reflected onto a visor. What is still unknown
+   is the thing that actually matters for rendering: **the visor's projection** — nothing in the corpus
+   or the rig describes the combiner, only the panel's CAD pose — plus the panel's native orientation,
+   and whether the vendor's alignment setup stores a pose we can read or does something else.
 7. Whether the Meta 2's published specifications agree with anything independent — the corpus states
    outright that no external spec has ever been cited here (`docs/07` §7.8), and §21.11 says this
    session could not check.
