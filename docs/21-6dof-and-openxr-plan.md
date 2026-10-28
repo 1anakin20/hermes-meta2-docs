@@ -77,6 +77,32 @@ calibration* (true, and measurable). See §21.4.
 | Mode | **1440 × 2560 @ 72 Hz**, 8-bit, RGB, SDR, **variable refresh rate: Not Supported** | Windows display adapter properties, display named **"Meta2"** |
 | GPU driving it | Intel(R) Iris(R) Xe Graphics (host iGPU) | same |
 | Optics | **No lenses.** The panel is **reflected onto a visor** — an optical see-through combiner, not a lens-coupled direct-view HMD. | `[OPERATOR-REPORTED]` |
+| Orientation | **Portrait is a deliberate Windows setting so the image fills the panel.** Windows therefore reports the desktop/active mode as 1440 × 2560; the panel itself is 2560 × 1440. | `[OPERATOR-REPORTED]` 2026-10-28 |
+
+### Fact B.2 — the first independent external specification ever checked against this unit (2026-10-28)
+
+`docs/07` §7.8's standing complaint — "no external spec has been cited anywhere in this repo" — is now
+addressed. VRcompare's Meta 2 spec page and a 2016 RoadToVR pre-order article were read directly:
+
+| External claim | Our measurement | Verdict |
+|---|---|---|
+| "Display Type: **Single LCD binocular**", "Ocularity: **Binocular**" | One EDID panel (`DISPLAY\MVNEA60`) | **Agrees.** One panel, seen by both eyes through the combiner. |
+| "Optics: **Curved mirrors**" | "reflected back on a visor" | **Agrees, and it matters:** a *curved* combiner is not a flat mirror — see the correction under Phase 7. |
+| "Resolution 1280×1440 per-eye … **3.69 million pixels overall**" | 1440 × 2560 reported = **2560 × 1440 = 3,686,400 px** | **Agrees exactly.** The panel is 2560 × 1440 and each eye is served a 1280 × 1440 half of it. |
+| "Native passthrough, **720p camera**" | EP `0x83` = **1280 × 720** UYVY | **Agrees exactly.** |
+| "PC-powered AR", "requires a connection to a PC", HDMI from the host | `[OPERATOR-REPORTED]` HDMI display + speakers from the host | **Agrees.** |
+| "6 DoF tracking", "does not require external base stations" | not yet measured by us | Corroborates that inside-out 6-DoF is a real shipped capability of this device — the whole premise of this plan. |
+| "Refresh Rate **60 Hz**" | EDID/Windows active signal mode **72 Hz** | **Conflict.** `[UNKNOWN]` which is real; resolve before pacing a renderer. |
+| "Meta (2016) … **no relation to Meta Platforms Inc**"; liquidated, assets acquired by Campfire | `docs/14` §1's identity rule | **Agrees**, and adds lineage: the Meta 2 design was adapted into the Campfire Headset. |
+
+`[INFERRED]` **Correction to what I wrote above: this is a binocular single-panel see-through display,
+not a monocular one.** One panel, both eyes, served through curved mirrors, each eye taking a 1280 × 1440
+half. That changes the rendering target concretely: a renderer must produce **two 1280 × 1440 views into
+one 2560 × 1440 swapchain**, not one full-panel image.
+`[MEASURED]` The vendor's per-eye compositor views (`GetDepthStencilViewForLeftEye/RightEye`) now read as
+corroboration of that split rather than as a software artefact, which is what I claimed a moment ago.
+`[UNKNOWN]` binocular overlap, IPD range (the external spec leaves it blank, consistent with fixed
+optics), and how the two halves map onto the visor.
 
 `[MEASURED]` This corroborates the rig. `g_cad_display`'s forward is `(0, +0.922, +0.388)` — "the
 screen faces mostly downward and 22° toward the front" (`docs/19` §19.5) — which is exactly the layout a
@@ -84,14 +110,20 @@ downward-facing panel reflecting off a visor produces. `[MEASURED]` The rig has 
 all**: `DisplayCalibration` gives poses for `g_cad_display` and `g_pmd_cad` and no intrinsics, and
 nothing in the rig describes the combiner itself.
 
-`[INFERRED]` **This is a monocular optical see-through display, not a stereo HMD.** One panel, no
-lenses, one combiner. That removes two blockers my draft listed and adds one:
+`[INFERRED]` **This is an optical see-through display, not a lens-coupled VR HMD.** One panel, no lenses,
+a curved-mirror visor. That removes one blocker my draft listed and sharpens two others — and my first
+pass at this got the ocularity wrong; see Fact B.2 for the correction.
 
-- **IPD is not needed.** There is no second eye image to separate. Drop it from the blocker list.
-- **Lens distortion is not needed.** There is no lens to invert.
-- **What replaces them is the visor projection**: the mapping from panel pixels to virtual-image rays,
-  set by the combiner's shape and its pose relative to the eye. Nothing in the corpus or the rig
-  describes it. That single unknown is now the whole display-calibration problem.
+- **No lens to invert.** There is no lens distortion model to fit. `[MEASURED]` The rig agrees:
+  `DisplayCalibration` entries carry poses and **no intrinsics**.
+- **But the combiner is curved** (`[MEASURED]` external spec: "Optics: Curved mirrors"), so the panel →
+  virtual-image mapping is **not** a plain pose either. My earlier "start from a pose model, not a
+  distortion model" was too optimistic and is corrected under Phase 7.
+- **IPD is not something we can set.** `[MEASURED]` The external spec lists no IPD range, consistent with
+  fixed optics; the rig has no IPD parameter. So IPD is a property of the hardware we must measure or
+  work around, not a knob.
+- **What the whole display-calibration problem reduces to:** the mapping from panel pixels to
+  virtual-image rays through a curved combiner, per eye. Nothing in the corpus or the rig describes it.
 
 `[MEASURED]` A concrete lead for reimplementing the vendor's alignment setup: `CompositorBlock`
 (library `meta_block_compositor`) declares `loose_fusion_name = LooseFusionBlock` and
@@ -261,8 +293,8 @@ OpenXR device roles are not interchangeable. Given Fact B **as corrected**:
 |---|---|---|
 | **TRACKER** (`XR_EXT_tracking_only`, position+orientation in a tracking space) | **Yes — and still the right first target**, but for a different reason than my first draft gave. Not because the display is unreachable, but because pose is the part that does not exist yet and every other role depends on it. | Needs pose + a space + a clock bridge. All three are buildable; none is built. |
 | **HMD** (runtime composites, headset shows) | **Yes, feasible.** `[OPERATOR-REPORTED]` The display and speakers are host-driven HDMI — "it's just a screen". `[MEASURED]` One panel, 1440 × 2560 @ 72 Hz, 8-bit RGB SDR, no VRR. The blocker is **not** a data path. | Blocked instead on: the visor projection (below), no validated pose, no latency measurement. All measurable, so this is a calibration-and-quality problem, not a missing capability. |
-| **Monocular see-through rendering** (the honest description of this device) | **Yes, and it is simpler than my draft assumed.** `[OPERATOR-REPORTED]` One panel, **no lenses**, image reflected onto a visor. | **No IPD needed** (no second eye image) and **no lens distortion to invert**. What is needed is the **combiner projection** — panel-pixel → virtual-image-ray — which nothing in the corpus or the rig describes. The vendor has a user-facing alignment setup for exactly this; see Fact B.1 for the lead on reimplementing it. |
-| **Stereo HMD** (two per-eye images) | **No — and this unit is not one.** `[MEASURED]` One panel (`DISPLAY\MVNEA60`, one EDID mode). | Stop describing this device as a stereo HMD. The vendor compositor's per-eye views (`GetDepthStencilViewForLeftEye/RightEye`) are a software artefact of a generic compositor, not evidence of two panels. |
+| **See-through rendering** (the honest description of this device) | **Yes.** `[OPERATOR-REPORTED]` One panel, **no lenses**, reflected onto a visor. `[MEASURED]` External spec: "Single LCD binocular", "Optics: Curved mirrors", 1280 × 1440 per eye from a 2560 × 1440 panel. | Needs two 1280 × 1440 views into one swapchain, and a **curved-combiner projection** per eye — which nothing in the corpus or the rig describes. The vendor has a user-facing alignment setup for exactly this; see Fact B.1 for the lead on reimplementing it. |
+| **Stereo HMD in the VR sense** (two panels, lens-coupled, IPD adjustment) | **No — and this unit is not one.** `[MEASURED]` One EDID panel, no lenses, no IPD range. | Do not describe this device as a VR HMD. It is binocular see-through AR through curved mirrors. |
 | **HMD with passthrough/depth** | No. | Depth (`0x84`) has never produced scene information (`docs/14` §3: "Depth has never been observed in any path"). |
 | **Hand/controller inputs** | No. | Buttons never observed on the wire (`docs/15` §1). `[OPERATOR-REPORTED]` Audio **output** is available, over the same HDMI. |
 
@@ -270,14 +302,34 @@ Two implementation routes for the tracker role, both real work, pick one in Phas
 corrected changes this choice, because a runtime that also drives a display is a different amount of
 work than one that does not:**
 
-- **Route A — provider plugin for an existing OpenXR runtime (Monado).** Less surface to build: you
-  implement a device/intent, the runtime handles sessions, spaces, and clients. `[INFERRED]` With the
-  display now known to be an ordinary host-side HDMI panel, Route A is also the cheaper route to the
-  **HMD** role, because the runtime already owns display enumeration, swapchains and compositing — you
-  would supply pose and let the runtime present. `[UNKNOWN]` Monado's current tracker-provider API shape,
-  whether it will accept a device whose display is a plain monitor rather than a runtime-managed HMD
-  panel, and its license compatibility with a GPL VIO backend — all must be verified (see §21.11, search
-  backend is down).
+- **Route A — provider plugin for an existing OpenXR runtime (Monado). Chosen by the operator
+  2026-10-28, and it must be cross-platform: Monado on the Linux box *and* on Windows.** `[MEASURED]`
+  What that actually means, read from Monado's own documentation:
+  - The surface we would write against is `xrt_device`, plus a prober — either `xrt_auto_prober` or an
+    `xrt_prober_found_func_t` — registered in `src/xrt/targets/common/target_lists.c`. Monado's own
+    guidance: "you use the auto prober interface when the basic USB VID/PID-based interface is not
+    sufficient … or if you don't want to use the built-in HID support." Our device is VID/PID-visible
+    (`2CFA:00F3`) but not HID, so the auto prober path is the one.
+  - **A maintenance warning from Monado itself:** "Monado is intended to not expose any external API
+    other than the OpenXR API: the XRT interfaces are subject to change as required so those writing
+    drivers or other software on those interfaces are encouraged to upstream as much as possible to
+    minimize maintenance burden." `[INFERRED]` A private out-of-tree driver is a standing rebase tax;
+    upstreaming `meta2` into Monado is the low-maintenance path if we ever want that.
+  - **The Windows problem is real and specific.** `[MEASURED]` Monado's own Windows build page: "Monado
+    has a **work-in-progress port to Windows**. While it's **not ready for widespread usage due to some
+    rough edges and lack of drivers**, it does build and can serve as a base for further development."
+    And under Limitations: "there are current limitations in the Windows build. The main one currently is
+    **no actual headset drivers yet**, partially because **some USB stuff needs porting**, and partially
+    because **direct mode on Windows is more complicated**." `[INFERRED]` That is precisely the surface we
+    need — a USB device driver plus display presentation — so on Windows we would be writing the driver
+    *and* porting underneath it.
+  - Practical Windows details from the same page: build with CMake + vcpkg, `-DXRT_FEATURE_SERVICE=ON`
+    for the out-of-process `monado-service.exe`, and point clients at the runtime with
+    `XR_RUNTIME_JSON=…\openxr_monado-dev.json` instead of installing the manifest into the registry.
+
+`[INFERRED]` Consequence for sequencing: **Linux is where the Monado provider should be built first**,
+because that is where Monado is a finished product. The Windows target is real work on Monado's own
+unfinished port, and it should be scheduled as its own phase rather than assumed to be a rebuild.
 - **Route B — our own minimal OpenXR runtime** that PC apps connect to. Full control, much larger
   surface (session lifecycle, spaces, swapchains, conformance). `[INFERRED]` Only worth it if the HMD
   role turns out to need display behaviour no existing runtime offers — which is exactly the question
@@ -306,13 +358,52 @@ our *measured* rig:
 
 | Candidate | Fit against our measured facts | Concern |
 |---|---|---|
-| **Basalt** | Supports Kannala-Brandt fisheye natively (our model is KB4), stereo-inertial, and ships offline calibration tooling including camera-IMU extrinsics — which is exactly §21.2 item 1. | `[UNKNOWN]` license terms (believed GPLv3, **unverified this session**); irregular timestamps. |
-| **OpenVINS** | Stereo-inertial, fisheye support, actively maintained, good docs, designed around irregular sensor rates. | Camera model is the equidistant/division model; our KB4 must be converted or refitted. `[UNKNOWN]` license (believed GPLv3). |
-| **ORB-SLAM3** (stereo-inertial) | Closest to the vendor's own stack — the vendor SLAM is ORB-SLAM2-derived `[MEASURED]` via the Pangolin third-party licence. Its fisheye branch supports Kannala-Brandt. Needs a vocabulary; `data/vslam_voc.bin` is **not in our possession** (it is named in the graph but no copy exists in `meta2-docs` or `meta2lib` — verified by `find`, 2026-10-28). | GPLv3 (believed, unverified). Heavier. Vocabulary must come from its own distribution. |
+| **Basalt** | Supports Kannala-Brandt fisheye natively (our model is KB4), stereo-inertial, and ships offline calibration tooling including camera-IMU extrinsics — which is exactly §21.2 item 1. | **License now verified: BSD 3-Clause** (`[MEASURED]` read from `raw.githubusercontent.com/VladyslavUsenko/basalt/master/LICENSE`, "BSD 3-Clause License Copyright (c) 2019, Vladyslav Usenko and Nikolaus Demmel"). This **corrects** my draft's "believed GPLv3". No copyleft obstacle. Remaining concern: irregular timestamps. |
+| **OpenVINS** | Stereo-inertial, fisheye support, actively maintained, good docs, designed around irregular sensor rates. | Camera model is the equidistant/division model; our KB4 must be converted or refitted. **License now verified: GPLv3** (`[MEASURED]` read from `raw.githubusercontent.com/rpng/open_vins/master/LICENSE`). |
+| **ORB-SLAM3** (stereo-inertial) | Its fisheye branch supports Kannala-Brandt. Needs a vocabulary; `data/vslam_voc.bin` is **not in our possession** (named in the graph, no copy exists in `meta2-docs` or `meta2lib` — verified by `find`, 2026-10-28). | **License now verified: GPLv3** (`[MEASURED]` read from `raw.githubusercontent.com/UZ-SLAMLab/ORB_SLAM3/master/LICENSE`). Heavier. Vocabulary must come from its own distribution. `[CORRECTED]` I previously justified this candidate as "closest to the vendor's own stack". **That is not a reason** — see §21.5a. Its real merits are KB4 support and maturity; its real costs are GPL and weight. |
 
 `[INFERRED]` A decisive practical point: **modern VIO backends can estimate the camera-IMU extrinsic
 online.** So Phase 4 can *start before* Phase 3 finishes and *produce* the missing calibration as a
 by-product. That is the reason to sequence reuse before in-house work.
+
+### 21.5a Why the vendor SDK appears in this plan at all — and what it is *not*
+
+`[OPERATOR-REPORTED]` The operator's position, 2026-10-28: **"this is a custom implementation to make it
+as good as possible. It will not be faithful to the original SDK."** That is the correct posture, and
+nothing in this plan may be justified by "the vendor does it that way."
+
+So what is the decoded vendor graph actually for here? Four things, and only four:
+
+1. **A feasibility proof about the hardware, not a design to copy.** `[MEASURED]` The vendor's tracking
+   consumed exactly `mono0_OUT`, `mono1_OUT` and `imu0` — nothing else — and produced live pose on a
+   physical PC (559 distinct translation triples, `tracking_status (1,3)` in 559 of 637 polls). That is
+   the strongest evidence in the corpus that *our* input set is sufficient for 6-DoF on this rig. It says
+   nothing about whether their estimator is good, and beating it is the goal.
+2. **A free benchmark.** `[MEASURED]` A working implementation of the exact problem is installed on the
+   same machine. Running §21.8's protocol through both pipelines is a cross-check that costs nothing, and
+   it turns "our tracking works" into "our tracking is better by this much". Being *measured against* the
+   vendor is the opposite of being faithful to it.
+3. **Facts about frames and conventions.** `[MEASURED]` `target_frame=mono_right` tells us which frame
+   their numbers live in — needed only for comparison or for reusing their calibration.
+4. **Calibration we may be able to read instead of reinvent.** `[MEASURED]` `CompositorBlock` consumes
+   pose plus the sensors-DB rig, which is where `g_cad_display` lives. If the vendor's alignment setup
+   stores a pose, `meta2lib` already reads that file. Reusing a measured value is not faithfulness; it is
+   not redoing work that was already done.
+
+What must **not** happen is choosing an architecture because the vendor chose one. This plan already
+departs from the vendor on three points, and none of them needs justifying:
+
+- The vendor fuses **one** IMU (`imu0` only; `imu1` goes only to `DeviceStatusBlock`). `[MEASURED]` We
+  have two measured chips with a measured axis map and measured scales. Using both is an improvement to
+  test, not a deviation to defend.
+- The vendor's pose lives in the **`mono_right`** frame. `[INFERRED]` An OpenXR runtime wants a head/body
+  frame; producing pose there is better for our purpose.
+- The vendor's depth output is a fixed ~2.45 m shell with `pc_nz = 0` in every healthy poll.
+  `[MEASURED]` There is nothing in it worth reproducing.
+
+`[RULE]` Whenever this document cites the vendor, it is citing **evidence about the device** or **a
+benchmark to beat**. Any sentence that uses the SDK as a *reason to build something a particular way* is
+a defect in this document and should be deleted. That is a standing review criterion for future edits.
 
 **Step 2 — build ours only if Step 1 shows the rig is capable but the third-party estimator fights
 our quirks.** Our quirks are precisely the things generic VIOs assume away: a production-coupled
@@ -430,23 +521,26 @@ EKF + relocalisation with our own vocabulary.
 *Exit:* an OpenXR client enumerates the device and receives live pose that matches the §21.8 protocol
 to within the Phase 4 error budget.
 
-**Phase 7 — HMD role: monocular see-through rendering on the visor.** `[OPERATOR-REPORTED]` +
-`[MEASURED]` (Fact B.1) make this possible; Phases 1–6 make it worth doing.
+**Phase 7 — See-through rendering on the curved-mirror visor.** `[OPERATOR-REPORTED]` + `[MEASURED]`
+(Facts B.1 and B.2) make this possible; Phases 1–6 make it worth doing.
 
-Panel facts are **settled**: one panel, `DISPLAY\MVNEA60`, **1440 × 2560 @ 72 Hz**, 8-bit RGB, SDR, no
-VRR, driven by the host's Intel Iris Xe. `[COMPUTED HERE]` That is a **13.9 ms** frame period and
-**3.69 Mpix/frame ≈ 265 Mpix/s** of fill — modest for a modern iGPU, and the number OpenXR frame pacing
-should target. No VRR means the runtime must pace to a fixed 72 Hz.
+Panel facts are **settled**: one panel, `DISPLAY\MVNEA60`, **2560 × 1440 native** (Windows rotates it to
+portrait so it fills the visor), 8-bit RGB SDR, no VRR, driven by the host's Intel Iris Xe, served
+binocularly through **curved mirrors** at 1280 × 1440 per eye. `[COMPUTED HERE]` **3.69 Mpix/frame**,
+which matches the external spec's "3.69 million pixels overall" exactly. At the measured 72 Hz that is a
+**13.9 ms** frame period; at the 60 Hz the external spec claims it is **16.7 ms**. `[MEASURED conflict]`
+The two refresh figures disagree and must be resolved before a renderer is paced — `[UNKNOWN]` which is
+real. No VRR either way, so the runtime must pace to a fixed rate.
 
 What is left, in order:
 
-- **The visor projection — the only remaining display unknown.** `[MEASURED]` No lens, so no distortion
-  model to fit; `[MEASURED]` the rig has a `g_cad_display` pose and **no visor entry at all**. The thing
-  to determine is the mapping from panel pixels to virtual-image rays. `[INFERRED]` Because there is no
-  lens, this is plausibly a small pose problem (where the virtual image plane sits relative to the eye)
-  rather than a distortion problem — which is why the vendor's setup is an *alignment*, not a lens
-  calibration. Start by observing what the vendor's alignment setup actually changes host-side (a file,
-  a registry value, a rig rewrite, or nothing at all) before designing our own.
+- **The visor projection — the only remaining display unknown, and it is not just a pose.**
+  `[MEASURED]` No lens, so no lens-distortion model to fit; `[MEASURED]` external spec says the optics are
+  **curved mirrors**; `[MEASURED]` the rig has a `g_cad_display` pose and **no combiner entry at all**.
+  `[CORRECTED]` My earlier "start from a pose model, only add terms if forced" was too optimistic — a
+  curved combiner is a distortion element, and a flat-panel-to-virtual-image mapping through it will not
+  be a pure rotation. The honest plan is: measure it, then pick the simplest model the measurement
+  supports, rather than assuming the simplest model.
 - **An alignment procedure we can run ourselves**, mirroring the vendor's: render a known pattern, have
   the operator report where it lands against a physical edge, solve the transform. `[INFERRED]` This is
   the cheapest display calibration available and needs no fixture beyond a ruler and a wall.
@@ -519,10 +613,10 @@ Runs this plan will need, in order:
 6. **Ground-truth protocol runs** — §21.8, ours and the vendor SDK's, sequentially.
 7. ~~Display identification~~ — **DONE 2026-10-28, host-side only.** Results in Fact B.1: one panel
    (`DISPLAY\MVNEA60`, one EDID source mode), 1440 × 2560 @ 72 Hz, 8-bit RGB SDR, no VRR, Intel Iris Xe,
-   no lenses, image reflected onto a visor. Still worth one more host-side read: the **native panel
-   orientation** — Windows reports the desktop mode as 1440 wide × 2560 tall, which is portrait, and
-   whether that is the panel's native orientation or a rotation setting changes how a renderer should
-   present. `[UNKNOWN]`
+   no lenses, image reflected onto a visor. **Orientation now answered:** portrait is a deliberate Windows
+   setting so the image fills the panel, so the panel is 2560 × 1440 native. One cheap follow-up remains:
+   **the refresh conflict.** EDID/Windows report 72 Hz, the external spec says 60 Hz. A fixed-pattern
+   frame-count run on the panel settles which one a renderer should pace to. `[UNKNOWN]`
 8. **Vendor alignment observation** — host-side, no device probing. Run the Meta SDK's display alignment
    setup and record what it actually changes: a file, a registry value, a rig rewrite, or nothing
    observable. That tells us whether the alignment is a stored pose we can read with `meta2lib` or
@@ -541,29 +635,46 @@ Runs this plan will need, in order:
 | Mono tearing under load | Medium | Gated recipe; **reject** torn frames — the trailer is not a frame delimiter and concatenate-and-cut splices two frames together (`docs/10` §10.4). |
 | EP `0x82` collapse when other endpoints are undrained | Medium | Drain readers on all four endpoints even when discarding (`docs/10` §10.2). |
 | Lens model fails at the frame corners | Medium | Reject out-of-model pixels (`meta2_camera_bearing() == -1`); mask the corner caps, not a rectangular border. |
-| HMD role is feasible but the **visor projection is uncalibrated** — the rig has a panel pose and no combiner | High | Phase 7: observe what the vendor's alignment setup changes host-side, then run our own ruler-and-wall alignment procedure. No lens to fit, so start from a pose model and only add terms if the evidence demands them. |
-| Panel orientation assumed (Windows reports 1440 × 2560, i.e. portrait) | Medium | Confirm the panel's native orientation before writing a renderer; a wrong assumption puts a 2560-tall image into a 1440-tall viewport. |
-| Monado route assumed to run on the same Windows host as the device | Medium | Confirm which OS Monado actually runs on before planning the display path; Monado's Windows support is `[UNKNOWN]` here (search backend down). |
+| HMD role is feasible but the **visor projection is uncalibrated** — the rig has a panel pose and no combiner | High | Phase 7: observe what the vendor's alignment setup changes host-side, then run our own ruler-and-wall alignment procedure. The optics are **curved mirrors**, so measure before choosing a model. |
+| Third-party VIO license incompatible with our distribution | **Resolved 2026-10-28** | Measured from each project's own `LICENSE`: Basalt **BSD 3-Clause**, OpenVINS **GPLv3**, ORB-SLAM3 **GPLv3**. The best-fitting candidate is permissive. |
+| Refresh rate conflict: EDID/Windows say **72 Hz**, the external spec says **60 Hz** | Medium | Resolve before pacing anything. A renderer paced to 72 on a 60 Hz panel drifts; the reverse wastes headroom. Cheap to settle with a frame-counter test on the panel itself. |
+| Curved combiner assumed to be a pose when it is a distortion element | High | Measure the panel→virtual-image mapping before choosing a model (Phase 7). Do not assume the simplest model that fits the words "no lenses". |
+| Monado's Windows port has no headset drivers and needs USB porting | High | Build the provider on Linux first. Treat the Windows target as its own phase with its own risk, not as a rebuild of the Linux driver. |
+| Out-of-tree Monado driver carries a rebase tax (Monado explicitly discourages external XRT API use) | Medium | Decide early whether to upstream `meta2` into Monado; the alternative is permanently tracking a moving internal interface. |
 | Plan built on a stale corpus sentence (this document's first draft got Fact B wrong) | Process | Quote the **whole** section, not the first paragraph. `docs/01` §1.7 retracts its own sentence two paragraphs down; a grep for the sentence, not for the topic, is what missed it. |
-| Third-party VIO license incompatible with our distribution | Unknown | Resolve in Phase 0. `[UNKNOWN]` — could not verify this session (search backend down, §21.11). |
 | Blank-wall / looking-down scenes break visual tracking | Medium | Report it honestly as a property of the rig (§21.3); IMU-only fallback with degraded status. |
 | Reusing vendor `vslam_voc.bin` | N/A | Not available; not needed if we use a third-party vocabulary or build our own. |
 
 ---
 
-## 21.11 Blocker encountered while writing this plan
+## 21.11 Search backend: was blocked, now working (with one caveat)
 
-`web_search` returns `success: true` with **zero results** for every query, including the trivial
-control query "OpenXR specification" (three attempts, 2026-10-28). Per the user's standing rule I am
-not working around it. Two items in this plan genuinely need the web and are therefore **blocked
-until the search backend is fixed or a fallback is approved**:
+Earlier in this session `web_search` returned `success: true` with **zero results** for every query,
+including the control query "OpenXR specification". That was reported rather than worked around. The
+operator then asked for it to be fixed. Re-tested 2026-10-28:
 
-1. Reconciling the Meta 2's published hardware specifications with an independent source — the corpus
-   itself notes "no external spec has been cited anywhere in this repo" (`docs/07` §7.8), and this
-   matters for the display question (§21.4).
-2. Verifying the licenses and current camera-model support of the VIO candidates in §21.5 (the GPLv3
-   attributions above are my recollection, explicitly **unverified**, and must not be relied on for a
-   distribution decision).
+- `web_search` now returns real results, and `web_extract` returns full page text with `error: null` on
+  Wikipedia, Monado's docs, raw GitHub `LICENSE` files and VRcompare.
+- **The caveat is honest:** two of the first six queries returned `success: true` with an empty result
+  array, and the same queries rephrased returned five results each. So the backend is **intermittently**
+  empty rather than reliably populated — consistent with an upstream engine in the self-hosted meta-search
+  being rate-limited or blocked for some query shapes. `[UNKNOWN]` which upstream, and it is not diagnosed
+  further here.
+- **Attribution caveat:** this Hermes build strips the per-item `category` field from `web_search`
+  results, so the SearXNG fingerprint is unavailable. Attribution to the self-hosted backend is therefore
+  **not proven** by the responses themselves; it rests on the host config. `[UNKNOWN]` — and the host
+  config is not reachable from this terminal backend (`~/.hermes/config.yaml` does not exist on `server3`,
+  and the Docker socket is permission-denied for user `hermes`). If you want attribution proven, run
+  `hermes config get web` on the gateway host.
+
+Everything this plan previously listed as blocked by the outage is now answered with a citation:
+
+1. **External specification** — answered, see Fact B.2 (VRcompare Meta 2 spec page, read directly).
+2. **VIO candidate licenses** — answered by reading each `LICENSE` file from `raw.githubusercontent.com`:
+   Basalt **BSD 3-Clause**, OpenVINS **GPLv3**, ORB-SLAM3 **GPLv3**. My draft's "Basalt believed GPLv3"
+   was wrong.
+3. **Monado's Windows capability** — answered, see Route A: Monado's own docs describe the Windows port as
+   work-in-progress with **no headset drivers yet** and USB porting outstanding.
 
 Everything else in this plan is grounded in the repo.
 
@@ -576,17 +687,21 @@ Everything else in this plan is grounded in the repo.
    1440 × 2560 @ 72 Hz panel with no lenses? `[INFERRED]` The display side is now the *easier* half, so
    the sequencing argument for tracker-first got stronger, not weaker: rendering to a visor without
    validated pose produces something that visibly swims.
-2. **OpenXR route — CLOSED by the operator 2026-10-28: Monado (Route A).** `[OPERATOR-REPORTED]` "monado
-   works fine." One thing to confirm rather than assume: the headset and its HDMI panel are on a Windows
-   11 host (Fact B.1), and `[UNKNOWN]` — unverifiable this session, search backend down (§21.11) — how
-   well Monado's Windows build supports presenting to a real secondary display. If Monado is actually
-   running on Linux for you, then the tracking host decision (item 5) and the display work have to be
-   planned on Linux, and the Windows side becomes a second target rather than the first.
+2. **OpenXR route — CLOSED by the operator 2026-10-28: Monado (Route A), cross-platform — the Linux box
+   and Windows.** `[MEASURED]` Monado's own docs make the Windows half the expensive half: "not ready for
+   widespread usage due to some rough edges and lack of drivers", "no actual headset drivers yet … some
+   USB stuff needs porting". `[INFERRED]` Build the provider on Linux first; schedule Windows as its own
+   phase.
 3. **VIO strategy:** reuse-first as a measurement instrument (recommended) vs in-house from day one?
-4. **License posture:** is a GPL VIO backend acceptable in this stack?
-5. **Tracking host:** Windows 11 (where the device is) first, Linux second — or both from the start?
-6. **Search backend:** fix SearXNG/Firecrawl, change endpoint, or approve a fallback — §21.11 blocks
-   two items.
+4. **License posture — largely dissolved by measurement.** Basalt, the best-fitting candidate, is
+   **BSD 3-Clause**, so the GPL worry that motivated this question applies only to OpenVINS and
+   ORB-SLAM3. `[MEASURED]` All three licenses read from their own `LICENSE` files. The remaining question
+   is only: do we want a GPL VIO in the stack at all, given a permissive option covers our camera model?
+5. **Tracking host:** now entangled with decision 2. The device is on Windows 11, Monado is finished on
+   Linux and unfinished on Windows. `[INFERRED]` Either the device moves to the Linux box for tracking
+   work, or the Monado Windows port becomes a prerequisite rather than a target. Pick which.
+6. ~~Search backend~~ — **CLOSED 2026-10-28.** It works; the residual caveat (some queries return an
+   empty array and succeed when rephrased) is recorded in §21.11. Nothing in this plan is blocked on it.
 7. **Scope discipline:** ToF stays paused (recommended — it is not on the 6-DoF critical path), or
    resume IR-84 in parallel?
 8. **Library boundary:** keep `docs/14` §7's rule that "SLAM, rectification and rendering stay out of
@@ -649,6 +764,9 @@ What this plan does **not** resolve, and should not be read as resolving:
    is the thing that actually matters for rendering: **the visor's projection** — nothing in the corpus
    or the rig describes the combiner, only the panel's CAD pose — plus the panel's native orientation,
    and whether the vendor's alignment setup stores a pose we can read or does something else.
-7. Whether the Meta 2's published specifications agree with anything independent — the corpus states
-   outright that no external spec has ever been cited here (`docs/07` §7.8), and §21.11 says this
-   session could not check.
+7. ~~Whether the Meta 2's published specifications agree with anything independent~~ — **checked
+   2026-10-28**, see Fact B.2. The agreement is strong (single binocular panel, 3.69 Mpx overall, 720p
+   front camera, PC-powered, curved-mirror optics, 6-DoF without base stations). Two things it does **not**
+   settle: the **60 Hz vs 72 Hz** refresh conflict, and the fact that "1280×1440 per-eye" is VRcompare's
+   interpretation of a single 2560 × 1440 panel rather than a measurement of two displays — which is
+   consistent with our one-panel EDID but has not been verified on this unit.
