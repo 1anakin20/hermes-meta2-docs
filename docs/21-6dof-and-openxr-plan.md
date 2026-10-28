@@ -593,6 +593,80 @@ with existing OpenXR clients.
 
 ---
 
+### 21.4d The rebase tax, measured — and the visor problem is already solved in-tree (2026-10-28)
+
+The operator's objection: *"the continuous amount of work due to updates seems like a downside."*
+Measured rather than assumed. `git fetch --deepen=4000` on the clone first (it was `--depth 1`); the
+GitLab API is unusable for this because `gitlab.freedesktop.org` sits behind Anubis bot protection.
+
+`[MEASURED]` **Churn of the interfaces an in-tree driver would implement** (window 2024-06-01 →
+2026-10-28, 2,014 repo commits in that window):
+
+| Interface | Commits touching it |
+|---|---|
+| `src/xrt/include/xrt/xrt_device.h` | **50** |
+| `src/xrt/include/xrt/xrt_tracking.h` | 11 |
+| `src/xrt/auxiliary/util/u_distortion_mesh.h` | 7 |
+| `src/xrt/auxiliary/tracking/t_camera_models.h` | 8 |
+
+`[MEASURED]` **But churn ≠ breakage.** Of those 50 `xrt_device.h` commits: 12 additive, 3 removals, 2
+signature changes, 3 doc/NFC, and **6 are Monado's own "adapt driver to new … api change" commits** —
+`compute_distortion`, `set_output`, `get_view_poses`, `get_hand_tracking`, `get_tracked_pose`,
+`update_input`. So the real rate is **~2–3 breaking changes per 2.4 years**, all of the "now returns
+`xrt_result_t`" / "one extra argument" family.
+
+`[MEASURED]` **And each breaking change is small per component** — diffstat of the adaptation commits:
+
+| Breaking change | Whole-tree diffstat | Per-driver cost |
+|---|---|---|
+| `compute_distortion` API | 21 files, +61 / −83 | `xreal_air_hmd.c`: 9 lines |
+| `update_input` API | 30 files, +91 / −46 | single-digit lines |
+| `get_view_poses` API | 17 files, +140 / −156 | `vive_device.c`: 23 lines |
+
+`[INFERRED]` **So the tax is tens of lines per year, not a continuous rewrite** — roughly 2–3 events ×
+5–25 lines. If the driver is upstream, Monado's own maintainers make those edits in the same commit
+that changes the interface (that is exactly what those 6 commits are), and our cost approaches zero. If
+we carry an out-of-tree patch, we pay it ourselves. 45 in-tree drivers depend on the same contract,
+which is why the contract cannot churn violently.
+
+`[MEASURED]` **The decisive finding: Monado already carries a driver class for AR glasses with curved
+combiners.** `src/xrt/drivers/north_star/` (Project North Star) — `ns_hmd.c` 17,267 B, plus
+`distortion_3d/deformation_northstar.cpp` 10,308 B and `utility_northstar.h` 24,640 B. Its combiner
+distortion is **loaded from a JSON file at runtime**, not hardcoded:
+
+- `u_distortion_mesh.h:119` `struct u_ns_p2d_values { float x_coefficients_left[16];
+  x_coefficients_right[16]; … }` and `u_compute_distortion_ns_p2d(values, view, u, v, result)` — a
+  **16-coefficient 2D polynomial mapping panel (u,v) → ray**, per axis, per eye.
+- `ns_hmd.c:124 ns_p2d_parse` reads `left_uv_to_rect_x[16]`, `left_uv_to_rect_y[16]`,
+  `right_uv_to_rect_x[16]`, `right_uv_to_rect_y[16]`, per-eye FOV in radians, `baseline`, and
+  **`t265_to_nose_bridge`** — a translation + quaternion from the *tracking camera rig to the display*.
+- Example configs in-tree: `exampleconfigs/v2_lonestar_50cm.json`, `v2_deckx_50cm.json`,
+  `v1_deckx_50cm.json`.
+
+`[INFERRED]` **This is the shape of our missing calibration.** `t265_to_nose_bridge` is precisely the
+camera→display extrinsic the vendor rig does not give us (`docs/19`: IMU poses are identity, no
+camera-to-IMU extrinsics, no combiner entry). Our visor deliverable is therefore a concrete, bounded
+object: **4 × 16 polynomial coefficients + per-eye FOV + one camera→display pose**, in a format
+Monado already parses.
+
+`[INFERRED]` **Which resolves the operator's worry in the right order.** The visor risk is a
+*measurement* risk, not an *expression* risk:
+
+- In-tree is required to **express** the result — `d/remote` hardcodes `u_distortion_mesh_set_none`
+  (`r_hmd.c:175`), so out-of-tree genuinely cannot fix the projection. The worry is correct.
+- But the measurement itself is **runtime-independent**: render a known pattern to the panel, photograph
+  it through the visor with the headset's own cameras (we already stream them at nominal rates and have
+  a working calibration pipeline in `docs/19`), and fit the coefficients. No Monado code is needed to
+  learn whether the projection is recoverable at all.
+- Therefore the projection experiment should come **before** the driver decision is paid for, because it
+  is the only step that can tell us the problem is solvable.
+
+`[MEASURED]` Also relevant to Fact B's pacing question: `xrt_device` gained
+`get_compositor_info` "to allow drivers to provide live per-mode information about composition/pacing
+parameters such as display scanout time and direction" (25.1.0, !2617), a "panel refresh type enum"
+(2026-05-05), and "support compensation for rolling scanout hmds" (2025-10-08). An in-tree driver can
+therefore report our panel's real refresh behaviour to the compositor instead of guessing 60 vs 72 Hz.
+
 ## 21.5 Reuse an existing VIO, or build ours
 
 `[INFERRED]` **Do both, in that order, and do not debate it before Phase 4 numbers exist.**
@@ -973,6 +1047,17 @@ Everything else in this plan is grounded in the repo.
    after all?
 9. **First build:** Phase 1 (IMU-only 3-DoF AHRS, no new device capability, exercises the whole pose
    path) before any visual work (recommended), or go straight at the VIO?
+10. **Driver commitment — deferred behind a measurement (new 2026-10-28).** The operator's worry about
+    the visor projection being "wrong and not fixable" out-of-tree is **correct**: `d/remote` hardcodes
+    `u_distortion_mesh_set_none`, so only an in-tree driver can express the combiner. But the rebase tax
+    is measured at ~2–3 breaking interface changes per 2.4 years costing 5–25 lines each (§21.4d), so it
+    is not the reason to avoid in-tree. `[INFERRED]` The right sequence is therefore: run the
+    **visor-projection experiment first** (render a known pattern to the panel, photograph it through the
+    visor with the headset's own cameras, fit a North-Star-style 4 × 16 polynomial + camera→display pose)
+    because it is runtime-independent and it is the only step that can prove the problem is solvable.
+    Commit to the in-tree driver after that measurement, not before. `[UNKNOWN]` whether the projection is
+    recoverable from a photographable pattern at all — that is now the highest-value unknown in the
+    project, above tracking.
 
 ---
 
