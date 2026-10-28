@@ -330,6 +330,82 @@ work than one that does not:**
 `[INFERRED]` Consequence for sequencing: **Linux is where the Monado provider should be built first**,
 because that is where Monado is a finished product. The Windows target is real work on Monado's own
 unfinished port, and it should be scheduled as its own phase rather than assumed to be a rebuild.
+
+### 21.4a If Monado on Windows turns out to be bad: the alternatives, measured
+
+Read from Monado's own tree (`gitlab.freedesktop.org/monado/monado`, sparse clone at
+`~/work/monado-src`, 2026-10-28), its changelog, and its developer site.
+
+**First, what is actually missing on Windows — it is narrower than "Monado doesn't work there."**
+`[MEASURED]`
+
+- The runtime is actively maintained and released: vNEXT (2026-10-24), 25.1.0 (2025-12-09), 25.0.0
+  (2025-04-18), 24.0.0 (2024-06-07).
+- The Windows *runtime* side is getting fixed continuously: IPC over named pipes (!1525), D3D11 client
+  compositor (!943), D3D12 (!1340), OpenGL on Windows (!1465), Win32 GL handle import (!2302), "Build
+  system support for D3D on Windows" (!2276), and a Windows named-pipe shutdown fix in the current
+  vNEXT (!3029).
+- What is missing is the **device** side and **presentation**: in-tree `doc/winbuild.md` — "no actual
+  headset drivers yet, partially because some USB stuff needs porting, and partially because direct mode
+  on Windows is more complicated" — and the developer site, more bluntly: *"Most of the included VR
+  hardware drivers are limited to Linux at this time… On Windows, mostly simulated HMD and controller
+  drivers are usable. **Direct Mode access for existing HMDs when not using NDA APIs remains a major
+  blocker.**"*
+
+`[INFERRED]` That splits our problem cleanly. We are not blocked by "OpenXR on Windows" — clients work
+there. We are blocked by (a) nobody has written a USB headset driver for Windows Monado, and (b) direct
+mode. Both are avoidable by choosing a different *shape* of integration.
+
+**Two Monado capabilities that change the whole plan.** `[MEASURED]`
+
+1. **Monado already has a VIO backend.** "Inside-out (VIO/SLAM) tracking using an improved basalt fork
+   (`gitlab.freedesktop.org/mateosss/basalt`) with all supported stereo or more cameras such as Windows
+   Mixed Reality, Oculus Rift S, Valve Index." Changelog: `t/slam: Add Basalt as a possible external SLAM
+   system` (!941); "Introduce visual-inertial tracking interface header … remove `XRT_HAVE_BASALT` and
+   `XRT_HAVE_KIMERA` from CMake" (!2058); `d/twrap: Correct axis assignments for poses provided by basalt
+   VIO/SLAM, so they match the OpenXR axis definition` (!2228). The WMR driver does 6DoF through Basalt and
+   "Send calibration automatically to SLAM tracker … out of the box without user intervention" (!1334).
+   The interface header is `xrt/xrt_tracking.h`; `d/wmr/wmr_camera.c` pushes SLAM frames through Monado's
+   frame pipeline (`u_sink`, `u_frame`) exactly as our `meta2` driver would.
+   `[INFERRED]` **We may not need to write a VIO at all.** Our job could be: deliver stereo frames + IMU +
+   calibration into Monado's frame/tracking pipeline, and let Monado's Basalt fork produce the pose. That
+   makes §21.5's "reuse-first" recommendation much cheaper than it looked.
+2. **Monado already has an out-of-process device path.** `src/xrt/drivers/remote/` (`d/remote`), wire
+   protocol header `mndrmt3` (`r_interface.h:70`), connection by address + port
+   (`r_remote_connection_init(rc, addr, port)`). `r_hmd.c` implements a real HMD: `device_type =
+   XRT_DEVICE_TYPE_HMD`, `name = XRT_DEVICE_GENERIC_HMD`, orientation **and** position tracking,
+   `get_view_poses`, `view_count` 1 or 2 built with `u_device_setup_split_side_by_side` — **two views
+   side-by-side in one panel, which is exactly our geometry** — with display geometry supplied by the
+   caller (`r_hub_create(..., view_count, w_pixels, h_pixels, w_meters, h_meters, ...)`).
+   `[MEASURED]` What the protocol carries: per-view FOV, per-view pose, head-centre pose, two controllers.
+   What it does **not** carry: camera frames, display refresh control, swapchains. Distortion is explicitly
+   none (`u_distortion_mesh_set_none`), and FOV is hardcoded (85° per view for two views, 120° for one).
+
+**The alternatives, ranked.**
+
+| # | Option | What it buys us | Cost / risk |
+|---|---|---|---|
+| **A′** | **Remote device into Monado** (`d/remote`, `mndrmt3`): *we* run VIO (Basalt, BSD-3) in our own process and stream poses to `monado-service`. | No Monado fork, no patching internals, no rebase tax on the device side. Works with the runtime as shipped, and on Windows it sidesteps the missing USB headset driver entirely — the device becomes a TCP client in our own process. Cheapest path to a live OpenXR session. | `[MEASURED]` `r_hmd` has no refresh control, no distortion mesh, hardcoded FOV — so the curved-mirror projection cannot be expressed through it today. Pose-only. |
+| **A** | **In-tree Monado driver** (`xrt_device` + auto prober) feeding Monado's own Basalt VIO. | The "real" integration: cameras, IMU, calibration, display geometry, distortion all expressible. The only route where Monado does the tracking. | `[MEASURED]` On Windows this is the option that collides head-on with "no actual headset drivers yet … some USB stuff needs porting". On Linux it is straightforward. Monado warns XRT interfaces are not a stable external API → upstream or rebase forever. |
+| **B** | **Skip OpenXR for the display role.** Our own app renders straight to `DISPLAY\MVNEA60` as a borderless-fullscreen D3D11/Vulkan swapchain at 72 Hz; OpenXR is used only for tracking consumers. | Available **now**, on the machine the headset is already plugged into, with no runtime at all. Monado's own direct-mode doc confirms HMD panels "present themselves as a conventional monitor", and names our exact case: "Some HMD displays are **portrait mode** — either the application would need to rotate its rendering, or the monitor would need to be configured as a rotated monitor." Monado itself falls back to extended mode (`XRT_COMPOSITOR_FORCE_XCB=1`, `XRT_COMPOSITOR_XCB_FULLSCREEN=1`), with the caveat "Monado does not ensure displaying the compositor on the correct display." | `[INFERRED]` Extended mode costs latency versus direct mode; acceptable for a dev/debug viewer, not for a final see-through product. Third-party OpenXR apps would not target the headset. |
+| **C** | **Split the roles across machines.** `mndrmt3` connects by address + port, so the pose producer and the runtime can be different hosts: device on Windows (where it is plugged in) → poses → Monado on the Linux box → display on the Linux box. | Uses Monado where it is finished, and the device where it physically is. | `[INFERRED]` Requires the headset's HDMI to move to the Linux box, and adds a network hop into the pose path. |
+| **D** | **Monado inside WSL2, device passed through.** `[MEASURED]` Microsoft: `usbipd attach --wsl`, WSL kernel ≥ 5.10.60.1; "As long as the device is attached to WSL, it cannot be used by Windows." | A Linux Monado on the Windows machine, no dual boot. | `[UNKNOWN]` whether usbip carries 43 MB/s mono (or 58–85 MB/s RGB) with the control-write cadence our paced-async sustain needs — that is a measurement, not a guess. Presentation would go through WSLg. Experimental fallback, not a plan. |
+| **E** | **SteamVR as the Windows runtime.** `[MEASURED]` Valve's OpenVR Driver API is the supported way for third-party devices ("the OpenVR driver API, your devices will be supported in SteamVR games"); Monado also ships the reverse bridge (`monado.freedesktop.org/steamvr.html`) where "the SteamVR compositor and its direct mode implementation is used". | The mature Windows display/direct-mode path — someone else already solved presentation. | `[INFERRED]` Proprietary, requires Steam, and a custom-HMD OpenVR driver is a larger contract than an OpenXR device. Not the default. |
+| **F** | **Our own minimal OpenXR runtime** (Route B in §21.4). | Full ownership of presentation and the curved-mirror projection. | `[INFERRED]` By far the most work; justified only if A/A′/B all fail to give acceptable results. |
+
+`[MEASURED]` **A precedent worth stealing:** Monado's support table already lists "Direct-Tek WVR2 /
+VR-Tek Windows VR Glasses with the **2560x1440** resolution supported through OpenHMD" — a single-panel
+2560 × 1440 binocular HMD. Our panel geometry is not exotic to Monado, and
+`u_device_setup_split_side_by_side` is the helper that already implements it.
+
+`[INFERRED]` **Recommended shape given all of the above:** build the tracking pipeline as a standalone
+process from day one (it has to exist regardless), speak `mndrmt3` into Monado on Linux for the first
+live OpenXR session (A′), and render our own see-through content directly to the panel (B) while the
+in-tree Monado driver (A) is developed on Linux. That ordering means Windows never blocks us: the only
+Windows-specific work left is presentation, and B already covers it.
+
+`[MEASURED]` Monado source is now on the Linux box at `~/work/monado-src` (sparse: `doc`,
+`src/xrt/drivers/remote`, `src/xrt/drivers/wmr`) for reference.
 - **Route B — our own minimal OpenXR runtime** that PC apps connect to. Full control, much larger
   surface (session lifecycle, spaces, swapchains, conformance). `[INFERRED]` Only worth it if the HMD
   role turns out to need display behaviour no existing runtime offers — which is exactly the question
@@ -637,7 +713,7 @@ Runs this plan will need, in order:
 | Lens model fails at the frame corners | Medium | Reject out-of-model pixels (`meta2_camera_bearing() == -1`); mask the corner caps, not a rectangular border. |
 | HMD role is feasible but the **visor projection is uncalibrated** — the rig has a panel pose and no combiner | High | Phase 7: observe what the vendor's alignment setup changes host-side, then run our own ruler-and-wall alignment procedure. The optics are **curved mirrors**, so measure before choosing a model. |
 | Third-party VIO license incompatible with our distribution | **Resolved 2026-10-28** | Measured from each project's own `LICENSE`: Basalt **BSD 3-Clause**, OpenVINS **GPLv3**, ORB-SLAM3 **GPLv3**. The best-fitting candidate is permissive. |
-| Refresh rate conflict: EDID/Windows say **72 Hz**, the external spec says **60 Hz** | Medium | Resolve before pacing anything. A renderer paced to 72 on a 60 Hz panel drifts; the reverse wastes headroom. Cheap to settle with a frame-counter test on the panel itself. |
+| Refresh rate: external spec says 60 Hz, EDID/Windows say **72 Hz** | **Resolved by operator 2026-10-28** | "The display does appear as 72hz on the windows settings." **Pace to 72 Hz under ideal conditions** (13.9 ms budget), but read the refresh the display actually reports at runtime rather than hardcoding it, and degrade gracefully if a mode ever lands at 60. |
 | Curved combiner assumed to be a pose when it is a distortion element | High | Measure the panel→virtual-image mapping before choosing a model (Phase 7). Do not assume the simplest model that fits the words "no lenses". |
 | Monado's Windows port has no headset drivers and needs USB porting | High | Build the provider on Linux first. Treat the Windows target as its own phase with its own risk, not as a rebuild of the Linux driver. |
 | Out-of-tree Monado driver carries a rebase tax (Monado explicitly discourages external XRT API use) | Medium | Decide early whether to upstream `meta2` into Monado; the alternative is permanently tracking a moving internal interface. |
@@ -692,6 +768,18 @@ Everything else in this plan is grounded in the repo.
    widespread usage due to some rough edges and lack of drivers", "no actual headset drivers yet … some
    USB stuff needs porting". `[INFERRED]` Build the provider on Linux first; schedule Windows as its own
    phase.
+2a. **Integration shape — proposed, needs the operator's yes/no.** Per §21.4a: (i) the tracking pipeline
+   is a **standalone process** from day one, because it has to exist whichever runtime we pick; (ii) the
+   first live OpenXR session goes through Monado's **remote device protocol** (`mndrmt3`), which needs no
+   Monado fork and no Windows USB driver; (iii) our own see-through content renders **directly to the
+   panel** rather than waiting on a runtime's compositor; (iv) the in-tree Monado `xrt_device` driver is
+   developed on Linux, where Monado is finished, and is what eventually lets third-party OpenXR apps use
+   the headset. `[MEASURED]` Monado already carries a Basalt-based VIO backend, so (i) may mean "feed
+   Monado's tracker" rather than "write a VIO" — worth deciding before writing any estimator code.
+2b. **Display pacing — CLOSED by the operator 2026-10-28: aim for 72 Hz.** `[OPERATOR-REPORTED]` "The
+   display does appear as 72hz on the windows settings." `[INFERRED]` Design budget 13.9 ms/frame, but
+   query the mode at runtime instead of hardcoding 72, so a 60 Hz fallback is a config change rather than
+   a rewrite.
 3. **VIO strategy:** reuse-first as a measurement instrument (recommended) vs in-house from day one?
 4. **License posture — largely dissolved by measurement.** Basalt, the best-fitting candidate, is
    **BSD 3-Clause**, so the GPL worry that motivated this question applies only to OpenVINS and
