@@ -553,6 +553,16 @@ operating systems and maintains it. Our custom work is a **device driver**, not 
 runtime becomes justified only if presentation demands something no runtime offers (e.g. true direct
 mode on Windows), which is a Phase 7 measurement question, not an assumption.
 
+`[MEASURED]` **Tier 2 feasibility check — Monado's tracking layer already speaks our camera models.**
+`src/xrt/auxiliary/tracking/t_camera_models.h` defines `T_DISTORTION_FISHEYE_KB4` with
+`t_camera_calibration_kb4_params_float` and a full `project` / `unproject` / `undistort` /
+`flip_and_project` set — **Kannala-Brandt 8th-order fisheye, which is exactly the model our mono
+cameras use** (`docs/19`). `T_DISTORTION_OPENCV_RADTAN_5` also exists, which is close to our RGB
+radial-in-radius fit minus the tangential terms. On the OpenXR-facing side, `xrt_defines.h:169-171`
+offers `XRT_DISTORTION_MODEL_NONE | COMPUTE | MESHUV` — `COMPUTE` and `MESHUV` are the two mechanisms
+by which a driver expresses the curved combiner. `[INFERRED]` No camera-model translation layer is
+needed for Tier 2, which removes a class of work that would otherwise dominate the estimate.
+
 `[INFERRED]` **Sequencing consequence:** Tier 1 is scaffolding, not a competing destination. Its only
 justification is that it proves pose delivery into a real runtime and lets pose quality be judged
 through real OpenXR clients before the driver exists. If we decide to skip it, the destination is
