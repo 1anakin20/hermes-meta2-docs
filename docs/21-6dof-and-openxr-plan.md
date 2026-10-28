@@ -566,13 +566,13 @@ unchanged — Tier 2 — and only the early demo is lost.
 - **Tier 2 — the AR product:** an in-tree Monado driver that feeds Monado's Basalt and supplies
   distortion + passthrough. Developed on Linux, ported to Windows second. This is the only tier that
   can express the curved mirror.
-- **Route B — our own minimal OpenXR runtime** that PC apps connect to. Full control, much larger
-  surface (session lifecycle, spaces, swapchains, conformance). `[INFERRED]` Only worth it if the HMD
-  role turns out to need display behaviour no existing runtime offers — which is exactly the question
-  Phase 7's first bullet answers.
 
-`[INFERRED]` Recommendation: **Route A**, because it converts OpenXR from a research risk into an
-integration task, and because a Monado provider is testable with existing OpenXR clients.
+A third option — our own minimal OpenXR runtime — stays on the table as option **F** in §21.4a, and per
+the measurement above it is not required by any stated constraint.
+
+`[INFERRED]` Overall recommendation, unchanged: **Monado as the runtime (Route A)**, because it
+converts OpenXR from a research risk into an integration task, and because a Monado provider is testable
+with existing OpenXR clients.
 
 **What OpenXR additionally demands that we do not yet have:**
 - Pose **prediction** (`XrSpaceVelocity`, an answer for a future `predictedDisplayTime`) → needs the
