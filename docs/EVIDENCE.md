@@ -1873,3 +1873,41 @@ shared device-side throughput budget that gets divided, or a shared FIFO whose o
 how quickly every endpoint is serviced. Nothing measured so far separates them - aggregate bytes are
 41-49 MB/s across all four configurations, which is consistent with a budget but does not prove one.
 `[OPEN]` Whether `probe3`'s 99.7% is reproducible at all.
+
+## 41. The ToF imager is the M2450 at design step A12, pinned by constructor geometry (2026-11-06)
+
+Static evidence only; no device run. From the Ghidra corpus of `royale.2.3.1.dll` (§34 corpus).
+
+Each Royale imager class hard-codes its pixel array in its own constructor, as arguments 5 and 6 of
+the base `royale::imager::Imager::Imager(...)` call. Both calls sit directly above the `vftable`
+store that names the class, so attribution is by symbol:
+
+```c
+/* royale::imager::ImagerM2450::ImagerM2450 */
+royale::imager::Imager::Imager(this, p1, p2, p3, 0x120, 0x160, 4, 4, 3, 0x20, 4);   /* 288 x 352 */
+*(undefined ***)this = royale::imager::ImagerM2450::vftable;
+*(undefined4 *)(this + 0x228) = 0x1600120;                                          /* (352<<16)|288 */
+
+/* royale::imager::ImagerM2452::ImagerM2452 */
+royale::imager::Imager::Imager(this, p1, p2, pIVar3, 0xac, 0xe0, 4, 3, 3, 0x11, 4); /* 172 x 224 */
+*(undefined ***)this = royale::imager::ImagerM2452::vftable;
+```
+
+`[VERIFIED]` — the only two 288×352 sites in the decompiled corpus are the two M2450 constructor
+bodies; the M2452 sites are 172×224.
+
+The device's depth feed is 352×288 (`0xa886` read-back `0000015f00010120` = 351, 288; SDK
+`TimeOfFlight16Image(352, 288)`). `[MEASURED]` Therefore the imager is an **M2450**, not an M2452.
+
+Design step: `ImagerM2450::initialize` throws `"wrong design step"` unless
+`readImagerRegister(0xb0ad) == 0xa12`; our arm reads `0xb0ad` on the device and gets `0x0a12` (§35).
+`[MEASURED]` The module's only M2450 PLL strategies are `ModPllStrategyM2450_A12` and
+`DphyPllStrategyM2450_A12`. `[INFERRED, strong]` the part is the **A12** design step.
+
+Supporting constants read from `.rdata` by direct PE32+ parse (not Ghidra): modulation frequency
+acceptance window `[12.6 MHz, 400 MHz]` at `0x1802d32b8` / `0x1802d32c8`, reference-clock threshold
+`20,000,000` at `0x1802cd450`, DPHY target `133,333,333.3 * 3.0` at `0x1802cd568` / `0x1802d0fe0`.
+`[VERIFIED]`
+
+`[UNKNOWN]` M2450 is Royale's internal die name, not a commercial PMD part number; pixel pitch,
+format and emitter wavelength are not in the binary.

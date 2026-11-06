@@ -73,7 +73,9 @@ conclusions:
   EP `0x84` framing: 32-byte descriptor + 101,376 samples, magic slots `DEAD/F00D/DADD/ABBA/FEED/BEEF`,
   resynchronise on `0xDEAD`, geometry 352×288 from the `0xa886` read-back, intrinsics
   `fu 151.9015 fv 151.8631 u0 177.1966 v0 142.2995 k1 0.1575959 k2 -0.1942623 k3 0.04948911`, height 287.
-- **The imager is identified**: PMD Royale 2.3.1 HAL → SAQ bridge → M2450/M2452. Ghidra-derived
+- **The imager is identified**: PMD Royale 2.3.1 HAL → SAQ bridge → **M2450, design step A12**
+  (pinned by constructor geometry: M2450 = 288×352, M2452 = 172×224, and the device's depth feed is
+  352×288 — docs/12 §12.47, docs/EVIDENCE §41). Ghidra-derived
   modulation frequencies **30 / 60 / 20 / 99.5 MHz** → unambiguous ranges 4.9965 / 2.4983 / 7.4948 /
   1.5055 m. The Royale register space is the same 16-bit space as our `0xC0` primitive (measured).
 - **Illumination is real and register-only.** IR emitter on when armed (pooled blinded test, Fisher

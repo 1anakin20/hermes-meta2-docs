@@ -1984,3 +1984,47 @@ replay the arm *with* them on the Linux box and test the one metric that has bee
 along: EP `0x84` statistics between a hand at 10 cm and 1 m. If the transfers turn out to be small or
 empty on the wire too, hypothesis "module degraded / SDK2 Beta depth is a stub" moves to the front and
 the RGB/mono/IMU/EP `0x84` framing ships into `meta2lib`.
+
+### 12.47 The ToF imager model is pinned: PMD M2450, design step A12
+
+Added 2026-11-06, while closing out the ToF branch. This answers "which ToF sensor is in the device"
+without any new device run — it falls out of the Ghidra corpus already in `artifacts/`.
+
+Royale 2.3.1 hard-codes each imager's pixel array **inside its named constructor**, as the two
+geometry arguments to the base `royale::imager::Imager::Imager(...)` call:
+
+| constructor (symbol-named in the DLL) | base-ctor geometry args | array |
+|---|---|---|
+| `royale::imager::ImagerM2450::ImagerM2450` (`0x180240882` region) | `0x120, 0x160` | **288 × 352** |
+| `royale::imager::ImagerM2452::ImagerM2452` (`0x180243256` region) | `0xac, 0xe0` | 172 × 224 |
+
+`[VERIFIED]` — the two calls sit one line above their own `vftable` assignment, so the class is
+attributed by symbol, not by guess:
+
+```c
+royale::imager::Imager::Imager(param_1,param_2,param_3,param_4,0x120,0x160,4,4,3,0x20,4);
+*(undefined ***)param_1 = royale::imager::ImagerM2450::vftable;
+...
+*(undefined4 *)(param_1 + 0x228) = 0x1600120;   /* (352 << 16) | 288 */
+```
+
+The device's EP `0x84` feed is 352×288 — from the `0xa886` read-back (`0000015f00010120` = 351, 288,
+docs/08 §) and from `TimeOfFlight16Image(352, 288)` in the SDK (docs/11). That is the M2450 geometry
+and not the M2452 geometry. `[MEASURED]` + `[VERIFIED]`, and the elimination is clean: no other
+imager class in Royale 2.3.1 carries 288×352.
+
+**Design step A12.** `ImagerM2450::initialize` gates on `readImagerRegister(0xb0ad) != 0xa12` →
+throws `"wrong design step"` (§12.35). Our own arm reads `0xb0ad` and gets `0x0a12` back on the real
+device (docs/12 §12.38, docs/EVIDENCE §35). The only M2450 PLL strategies in the module are
+`ModPllStrategyM2450_A12` and `DphyPllStrategyM2450_A12`, and the A11 variant has no A12 gate. So the
+part is the **A12 design step of the M2450**, not A11. `[INFERRED, strong]` — consistent with two
+independent measurements and the symbol set; not a datasheet confirmation.
+
+`[MEASURED]` supporting constants, read straight out of `.rdata` (`royale.2.3.1.dll`, PE32+ parse):
+`ModPllStrategyM2450_A12` accepts modulation frequencies only in `[12,600,000, 400,000,000]` Hz
+(`0x1802d32b8`, `0x1802d32c8`), reference-clock threshold `20,000,000` (`0x1802cd450`), and the DPHY
+target `133,333,333.3 × 3.0 = 400 MHz` (`0x1802cd568`, `0x1802d0fe0`).
+
+**What this does not say.** "M2450" is Royale's internal name for the die; it is not a purchasable
+PMD part number, and nothing in the binary gives pixel pitch, format, or emitter wavelength. Any
+statement about those is `[UNKNOWN]`.
