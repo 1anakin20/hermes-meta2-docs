@@ -23,7 +23,7 @@ Built today on `server3`, provenance checked:
 | `meta2-demo-viewer` | `97bf28c` |
 | Toolchain | `x86_64-w64-mingw32-gcc 14-posix`, Qt 6.8.2 `mingw_64`, static libusb, `-static-libgcc -static-libstdc++` [measured] |
 | Binary timestamp | `meta2_capture_live.exe` 2026-11-06 08:31 [measured] |
-| Served | `http://192.168.2.251:8093/meta2-field-20261106.zip` — `GET` returned **200** and the full 15,360,280 bytes [measured] |
+| Served | `http://<server3>:8093/meta2-field-20261106.zip` — `GET` returned **200** and the full 15,360,280 bytes [measured] |
 
 **Why a new kit exists.** The kit shipped 2026-10-27 15:22 was built **51 minutes
 before** the commit that moved the RGB payload from `offset+32` to `offset+24`.
@@ -73,14 +73,14 @@ never unplug mid-session.
 ## 24.3 The channel problem, measured
 
 The link is **one-way today**: `server3` cannot reach the laptop (`ip neigh` →
-`192.168.2.243 FAILED`, TCP/22 closed, `ssh` → `No route to host`) [measured].
+`<laptop> FAILED`, TCP/22 closed, `ssh` → `No route to host`) [measured].
 Historically the laptop reached `server3` directly (`last` shows `hermes …
-192.168.2.243` sessions) [measured, historical]. Every option below is judged
+<laptop>` sessions) [measured, historical]. Every option below is judged
 against that asymmetry.
 
 ### A. HTTP pull from `server3` — works today, LAN-only
 
-Verified: `GET http://192.168.2.251:8093/meta2-field-20261106.zip` → 200, full
+Verified: `GET http://<server3>:8093/meta2-field-20261106.zip` → 200, full
 byte count [measured]. Port 8090 is Beszel (wall-dashboard), so 8093 was chosen.
 
 Covers: kit delivery, any artefact the agent produces. Does **not** cover: getting
@@ -91,8 +91,8 @@ captures back, and anything done away from the home LAN.
 If the laptop runs OpenSSH Server and is reachable, the agent can simply `ssh`
 into it from the existing terminal tool: no Hermes config change, no restart, and
 it covers both directions including running the capture tools on the laptop while
-the user coaches. The laptop was previously reachable this way (a key exists at
-`~/.ssh/id_ed25519_laptop`) [measured, historical].
+the user coaches. The laptop was previously reachable this way, via a dedicated key held
+on `server3` (path not published) [measured, historical].
 
 Blocker today is purely reachability, not software. Options: be on the home LAN,
 or a VPN (Tailscale/WireGuard — `server3` has neither installed [measured]), or a
@@ -127,8 +127,8 @@ Two things follow:
    way it should be filesystem-scoped first and shell only if actually needed.
 
 Blockers: the same reachability problem (the server must listen on an address
-`server3` can dial), plus the config change lives on the **gateway host
-`192.168.2.21`**, and `ssh` from `server3` to `.21` returns `Permission denied
+`server3` can dial), plus the config change lives on the **Hermes gateway host**, and `ssh` from
+`server3` to it returns `Permission denied
 (publickey,password)` [measured] — so this is a user action on the gateway, not
 something the agent can do from here. A `url`-based server also needs the `mcp`
 package's `mcp.client.streamable_http` support on the gateway; if it is missing the

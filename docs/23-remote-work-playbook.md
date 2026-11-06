@@ -17,13 +17,13 @@ quoted or summarised), **[inferred]** (a conclusion drawn from measured facts), 
 
 | Fact | Status |
 |---|---|
-| The agent's terminal backend is `ssh` to `server3` (`192.168.2.251`), Debian 13, kernel 6.12.111+deb13-amd64, user `hermes` | [measured] |
-| That `ssh` session originates from **`192.168.2.21`** — the Hermes gateway host, not the laptop (`SSH_CLIENT=192.168.2.21 40232 192.168.2.251 22`, and `ss` shows one established `:22` connection from `.21`) | [measured] |
+| The agent's terminal backend is `ssh` to `server3`, Debian 13, kernel 6.12.111+deb13-amd64, user `hermes` | [measured] |
+| That `ssh` session originates from **a home-LAN host** — the Hermes gateway host, not the laptop (`ss` shows one established `:22` connection from the gateway host; addresses deliberately not published) | [measured] |
 | Therefore: **as long as this chat is alive, the agent's Linux-side work continues**, independent of where the laptop is or whether the laptop can reach home | [inferred, from the two facts above] |
-| `server3` **cannot reach the laptop**: `ip neigh` shows `192.168.2.243 … FAILED`, TCP/22 connect fails, `ssh` gives `No route to host` | [measured] |
-| Historically the laptop *did* ssh to `server3` directly (`last` shows `hermes … 192.168.2.243` sessions on Oct 16–17) — so the laptop→server3 direction works when the laptop is on the home LAN | [measured, historical] |
-| `server3` has **no Tailscale, no WireGuard**; interfaces are `eno1 192.168.2.251/24` plus Docker bridges; public egress is `69.156.169.207` | [measured] |
-| A hairpin probe from `server3` to `69.156.169.207:22` failed. **Inconclusive** for the outside-in direction — NAT hairpinning commonly fails even when a port forward exists | [measured, inconclusive] |
+| `server3` **cannot reach the laptop**: `ip neigh` shows `<laptop> … FAILED`, TCP/22 connect fails, `ssh` gives `No route to host` | [measured] |
+| Historically the laptop *did* ssh to `server3` directly (`last` shows `hermes … <laptop>` sessions on Oct 16–17) — so the laptop→server3 direction works when the laptop is on the home LAN | [measured, historical] |
+| `server3` has **no Tailscale, no WireGuard**; interfaces are one LAN address on `eno1` plus Docker bridges; the public egress address is not published | [measured] |
+| A hairpin probe from `server3` to its own public address on port 22 failed. **Inconclusive** for the outside-in direction — NAT hairpinning commonly fails even when a port forward exists | [measured, inconclusive] |
 | Port **8090 is now occupied by Beszel** (`/beszel serve --http=0.0.0.0:8090`, docker-proxy), part of the wall-dashboard stack. The old ad-hoc HTTP file server on 8090 is gone | [measured] |
 | `8420` (Glance) and `22` are the other listeners on `0.0.0.0` | [measured] |
 | Disk: `106G` total, `69G` used, **`36G` free** on `/` | [measured] |
